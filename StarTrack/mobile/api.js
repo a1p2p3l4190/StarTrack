@@ -1,0 +1,111 @@
+// api.js — thin fetch wrapper around the StarTrack Go backend.
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { resolveApiBase } from './utils';
+
+// Simulators/web can reach the backend via localhost. A physical device (or
+// Android emulator) needs the dev machine's LAN IP instead, which we derive
+// from the same host Expo/Metro was already reached through.
+const detectedHostUri = Constants.expoConfig?.hostUri || Constants.expoGoConfig?.debuggerHost;
+export const API_BASE = resolveApiBase(detectedHostUri, Platform.OS);
+
+// SecureStore wraps iOS Keychain / Android Keystore — hardware-backed
+// encryption at rest, not just "somewhere on disk" like AsyncStorage. It has
+// no web implementation, so web keeps the old in-memory-only behavior (a
+// page reload there just means signing in again, which is a fine tradeoff
+// for a browser tab that isn't carrying the same "device gets stolen" risk).
+const TOKEN_KEY = 'startrack_auth_token';
+const SECURE_STORE_AVAILABLE = Platform.OS !== 'web';
+
+let authToken = null;
+
+export async function setAuthToken(token) {
+  authToken = token;
+  if (!SECURE_STORE_AVAILABLE) return;
+  try {
+    if (token) {
+      await SecureStore.setItemAsync(TOKEN_KEY, token);
+    } else {
+      await SecureStore.deleteItemAsync(TOKEN_KEY);
+    }
+  } catch (err) {
+    console.warn('Failed to persist auth token securely', err.message);
+  }
+}
+
+// Called once at app boot to restore a session from a previous launch.
+// Returns the token (also caching it in memory) or null if there isn't one.
+export async function loadStoredAuthToken() {
+  if (!SECURE_STORE_AVAILABLE) return null;
+  try {
+    const token = await SecureStore.getItemAsync(TOKEN_KEY);
+    authToken = token;
+    return token;
+  } catch (err) {
+    console.warn('Failed to read stored auth token', err.message);
+    return null;
+  }
+}
+
+export function getAuthToken() {
+  return authToken;
+}
+
+// Set by App.jsx at mount so a 401 (expired/invalid token, backend restart)
+// can bounce the user back to the login screen instead of just throwing an
+// error that leaves them stuck on a screen that will 401 on every retry.
+let unauthorizedHandler = null;
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
+}
+
+async function request(path, { method = 'GET', body, auth = false } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (auth && authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && auth) {
+      await setAuthToken(null);
+      if (unauthorizedHandler) unauthorizedHandler();
+    }
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+export const api = {
+  register: (payload) => request('/auth/register', { method: 'POST', body: payload }),
+  login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
+  me: () => request('/auth/me', { auth: true }),
+
+  restaurants: () => request('/restaurants'),
+
+  reviews: (restaurantId) => request(`/restaurants/${restaurantId}/reviews`),
+  reviewEligibility: (restaurantId) =>
+    request(`/restaurants/${restaurantId}/review-eligibility`, { auth: true }),
+  createReview: (restaurantId, payload) =>
+    request(`/restaurants/${restaurantId}/reviews`, { method: 'POST', body: payload, auth: true }),
+
+  // Simulates reading a physical NFC tag (which would already be etched
+  // with {tag_id, signature} at provisioning time). Real hardware would
+  // read this off the tag directly instead of asking the backend for it.
+  simulateNfcScan: (restaurantId) => request(`/restaurants/${restaurantId}/simulate-nfc-scan`),
+  verifyCheckin: (payload) => request('/checkins/verify', { method: 'POST', body: payload, auth: true }),
+  checkinHistory: () => request('/checkins/me/history', { auth: true }),
+  passport: () => request('/checkins/me/passport', { auth: true }),
+
+  badges: () => request('/badges', { auth: true }),
+  leaderboard: () => request('/leaderboard'),
+
+  wishlist: () => request('/wishlist', { auth: true }),
+  addWishlist: (payload) => request('/wishlist', { method: 'POST', body: payload, auth: true }),
+  removeWishlist: (id) => request(`/wishlist/${id}`, { method: 'DELETE', auth: true }),
+};

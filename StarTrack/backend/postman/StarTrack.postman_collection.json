@@ -1,0 +1,493 @@
+{
+  "info": {
+    "name": "StarTrack API",
+    "description": "StarTrack backend — auth, restaurants, NFC devices, checkins, reviews, badges, leaderboard, wishlist, anomalies. Run requests top-to-bottom within a folder the first time; login/scan/create requests save IDs and tokens into collection variables that later requests reuse automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8081/api" },
+    { "key": "user_token", "value": "" },
+    { "key": "user_id", "value": "" },
+    { "key": "admin_token", "value": "" },
+    { "key": "restaurant_id", "value": "1" },
+    { "key": "restaurant_lat", "value": "41.8984" },
+    { "key": "restaurant_long", "value": "-87.6242" },
+    { "key": "device_id", "value": "" },
+    { "key": "tag_id", "value": "" },
+    { "key": "signature", "value": "" },
+    { "key": "wishlist_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{$randomEmail}}\",\n  \"password\": \"StarTrack123!\",\n  \"display_name\": \"Postman Tester\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Login (Demo User)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set('user_token', data.token);",
+                  "pm.collectionVariables.set('user_id', data.user.id);",
+                  "pm.test('login succeeded', () => pm.response.code === 200);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"demo@startrack.app\",\n  \"password\": \"StarTrack123!\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Login (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set('admin_token', data.token);",
+                  "pm.test('admin login succeeded', () => pm.response.code === 200);",
+                  "pm.test('role is admin', () => data.user.role === 'admin');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@startrack.app\",\n  \"password\": \"StarTrack123!\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": { "raw": "{{base_url}}/auth/me", "host": ["{{base_url}}"], "path": ["auth", "me"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Restaurants",
+      "item": [
+        {
+          "name": "List Restaurants",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/restaurants?city=Chicago",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants"],
+              "query": [{ "key": "city", "value": "Chicago", "description": "optional: year, stars, cuisine, city, country, q" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Restaurant",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Restaurant (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('restaurant_id', pm.response.json().id);",
+                  "}",
+                  "pm.test('created', () => pm.response.code === 201);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Bistro\",\n  \"stars\": 2,\n  \"country\": \"USA\",\n  \"city\": \"Austin\",\n  \"address\": \"1 Congress Ave\",\n  \"cuisine\": \"Tex-Mex\",\n  \"year_awarded\": 2026,\n  \"location_lat\": 30.2672,\n  \"location_long\": -97.7431\n}"
+            },
+            "url": { "raw": "{{base_url}}/restaurants", "host": ["{{base_url}}"], "path": ["restaurants"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Restaurant (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Bistro (Updated)\",\n  \"stars\": 3,\n  \"city\": \"Austin\",\n  \"cuisine\": \"Tex-Mex\",\n  \"year_awarded\": 2026\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Restaurant (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "NFC Devices (Admin)",
+      "item": [
+        {
+          "name": "List NFC Devices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": { "raw": "{{base_url}}/nfc-devices", "host": ["{{base_url}}"], "path": ["nfc-devices"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Create NFC Device",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json();",
+                  "  pm.collectionVariables.set('device_id', data.id);",
+                  "}",
+                  "pm.test('created', () => pm.response.code === 201);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tag_id\": \"TAG-POSTMAN-{{$randomInt}}\",\n  \"restaurant_id\": {{restaurant_id}},\n  \"salt\": \"postman-salt\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/nfc-devices", "host": ["{{base_url}}"], "path": ["nfc-devices"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Update NFC Device",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"salt\": \"rotated-postman-salt\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/nfc-devices/{{device_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["nfc-devices", "{{device_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete NFC Device",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/nfc-devices/{{device_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["nfc-devices", "{{device_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Checkins (NFC)",
+      "item": [
+        {
+          "name": "Simulate NFC Scan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set('tag_id', data.tag_id);",
+                  "pm.collectionVariables.set('signature', data.signature);",
+                  "pm.test('got tag + signature', () => !!data.tag_id && !!data.signature);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}/simulate-nfc-scan",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}", "simulate-nfc-scan"]
+            },
+            "description": "Dev-only helper standing in for tapping a physical NFC tag. Run this before 'Verify Checkin' to populate {{tag_id}}/{{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Checkin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{user_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tag_id\": \"{{tag_id}}\",\n  \"signature\": \"{{signature}}\",\n  \"location_lat\": {{restaurant_lat}},\n  \"location_long\": {{restaurant_long}}\n}"
+            },
+            "url": { "raw": "{{base_url}}/checkins/verify", "host": ["{{base_url}}"], "path": ["checkins", "verify"] },
+            "description": "Uses restaurant_lat/restaurant_long so the geofence check passes for the default seeded restaurant (Aurum Table, Chicago). Point them elsewhere to test a geofence failure."
+          },
+          "response": []
+        },
+        {
+          "name": "Checkin History",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": { "raw": "{{base_url}}/checkins/me/history", "host": ["{{base_url}}"], "path": ["checkins", "me", "history"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Passport",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": { "raw": "{{base_url}}/checkins/me/passport", "host": ["{{base_url}}"], "path": ["checkins", "me", "passport"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reviews",
+      "item": [
+        {
+          "name": "List Reviews",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}/reviews",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}", "reviews"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Review Eligibility",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}/review-eligibility",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}", "review-eligibility"]
+            },
+            "description": "true only after 'Verify Checkin' has succeeded for this restaurant in the last 7 days."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{user_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Incredible tasting menu, sent from Postman.\",\n  \"food_photo_label\": \"Seared Wagyu A5\",\n  \"menu_label\": \"Summer Degustation Menu\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/restaurants/{{restaurant_id}}/reviews",
+              "host": ["{{base_url}}"],
+              "path": ["restaurants", "{{restaurant_id}}", "reviews"]
+            },
+            "description": "Requires a verified checkin at this restaurant within the last 7 days (run the Checkins folder first)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Badges & Leaderboard",
+      "item": [
+        {
+          "name": "List Badges",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": { "raw": "{{base_url}}/badges", "host": ["{{base_url}}"], "path": ["badges"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Leaderboard",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/leaderboard", "host": ["{{base_url}}"], "path": ["leaderboard"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Wishlist",
+      "item": [
+        {
+          "name": "List Wishlist",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": { "raw": "{{base_url}}/wishlist", "host": ["{{base_url}}"], "path": ["wishlist"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Wishlist Item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('wishlist_id', pm.response.json().id);",
+                  "}",
+                  "pm.test('created', () => pm.response.code === 201);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{user_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"restaurant_name\": \"Noir Atelier\",\n  \"note\": \"Next release: 1 May\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/wishlist", "host": ["{{base_url}}"], "path": ["wishlist"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Wishlist Item",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{user_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/wishlist/{{wishlist_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["wishlist", "{{wishlist_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Security Dashboard (Admin)",
+      "item": [
+        {
+          "name": "List Anomalies",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_token}}" }],
+            "url": { "raw": "{{base_url}}/anomalies", "host": ["{{base_url}}"], "path": ["anomalies"] }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

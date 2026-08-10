@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const v=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\(v.filter\\(x=>x.startsWith\\('52.'\\)\\).slice\\(-5\\)\\)\")",
+      "Bash(npm uninstall *)",
+      "Bash(node node_modules/jest/bin/jest.js --version)",
+      "Bash(npm test *)",
+      "Bash(node drive5.js)",
+      "Bash(taskkill //PID 37716 //F)"
+    ]
+  }
+}
