@@ -73,6 +73,7 @@ const CHECKIN_MESSAGE_COPY = {
   'geofence validation failed': "You're a bit too far from the venue. Move within 200m of the entrance and try again.",
   'unknown NFC tag': "We don't recognize this tag yet — please ask staff to confirm the venue's NFC point.",
   'this device has been disabled': 'This check-in point is temporarily unavailable. Please ask staff for assistance.',
+  'recent verified checkin exists': "You already checked in here a few minutes ago — check your Passport, no need to scan again.",
 };
 
 export function mapCheckinMessage(message) {

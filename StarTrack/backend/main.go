@@ -92,10 +92,14 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.PATCH("/nfc-devices/:id/status", auth, admin, updateNFCDeviceStatusHandler)
 		api.DELETE("/nfc-devices/:id", auth, admin, deleteNFCDeviceHandler)
 
-		// Reviews — public reads, verified-checkin-gated writes
+		// Reviews — public reads, verified-checkin-gated writes. One review
+		// per checkin: create is nested under the restaurant, edit/delete
+		// address the review directly since it's already checkin-scoped.
 		api.GET("/restaurants/:id/reviews", listReviewsHandler)
 		api.GET("/restaurants/:id/review-eligibility", auth, reviewEligibilityHandler)
 		api.POST("/restaurants/:id/reviews", auth, createReviewHandler)
+		api.PUT("/reviews/:id", auth, updateReviewHandler)
+		api.DELETE("/reviews/:id", auth, deleteReviewHandler)
 
 		// Checkins — mobile, requires login
 		api.GET("/restaurants/:id/simulate-nfc-scan", simulateNfcScanHandler)

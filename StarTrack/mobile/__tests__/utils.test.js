@@ -103,6 +103,7 @@ describe('mapCheckinMessage', () => {
     expect(mapCheckinMessage('signature validation failed')).toMatch(/couldn't be verified/i);
     expect(mapCheckinMessage('unknown NFC tag')).toMatch(/don't recognize/i);
     expect(mapCheckinMessage('this device has been disabled')).toMatch(/temporarily unavailable/i);
+    expect(mapCheckinMessage('recent verified checkin exists')).toMatch(/already checked in/i);
   });
 
   it('passes unknown messages through unchanged', () => {

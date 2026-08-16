@@ -11,6 +11,7 @@ import (
 )
 
 const geofenceRadiusKM = 0.2 // ~200m tolerance around a restaurant's registered coordinates
+const checkinCooldownWindow = 5 * time.Minute
 
 type verifyCheckinRequest struct {
 	TagID        string  `json:"tag_id" binding:"required"`
@@ -41,6 +42,14 @@ func verifyCheckinHandler(c *gin.Context) {
 	var restaurant Restaurant
 	if err := db.First(&restaurant, device.RestaurantID).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"verified": false, "message": "restaurant not found"})
+		return
+	}
+
+	// A flaky connection can make a successful checkin look like it failed on
+	// the client, which invites an immediate retry. Reject that retry instead
+	// of double-awarding score/badges for what was really one visit.
+	if hasRecentVerifiedCheckin(userID, restaurant.ID) {
+		c.JSON(http.StatusConflict, gin.H{"verified": false, "message": "recent verified checkin exists"})
 		return
 	}
 
@@ -170,6 +179,15 @@ func buildCheckinHistory(userID uint) map[string]checkinHistoryEntry {
 		}
 	}
 	return history
+}
+
+func hasRecentVerifiedCheckin(userID, restaurantID uint) bool {
+	var count int64
+	cutoff := time.Now().Add(-checkinCooldownWindow)
+	db.Model(&CheckIn{}).
+		Where("user_id = ? AND restaurant_id = ? AND verified = ? AND verified_at >= ?", userID, restaurantID, true, cutoff).
+		Count(&count)
+	return count > 0
 }
 
 func initials(name string) string {

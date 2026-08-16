@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type User struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
@@ -64,15 +68,22 @@ func (CheckIn) TableName() string {
 	return "checkins"
 }
 
+// Review is scoped to a single verified visit (CheckInID): a user gets one
+// review per checkin, editable/deletable by them, and a fresh checkin at the
+// same restaurant unlocks another review slot. CheckInID is nullable only to
+// keep pre-existing rows (created before this field existed) from breaking.
 type Review struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	RestaurantID   uint      `gorm:"index" json:"restaurant_id"`
-	UserID         uint      `gorm:"index" json:"user_id"`
-	Rating         int       `gorm:"not null" json:"rating"`
-	Comment        string    `gorm:"type:text;not null" json:"comment"`
-	FoodPhotoLabel string    `gorm:"size:255" json:"food_photo_label"`
-	MenuLabel      string    `gorm:"size:255" json:"menu_label"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             uint           `gorm:"primaryKey" json:"id"`
+	RestaurantID   uint           `gorm:"index" json:"restaurant_id"`
+	UserID         uint           `gorm:"index" json:"user_id"`
+	CheckInID      *uint          `gorm:"column:checkin_id;index" json:"checkin_id"`
+	Rating         int            `gorm:"not null" json:"rating"`
+	Comment        string         `gorm:"type:text;not null" json:"comment"`
+	FoodPhotoLabel string         `gorm:"size:255" json:"food_photo_label"`
+	MenuLabel      string         `gorm:"size:255" json:"menu_label"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 
 	Author User `gorm:"foreignKey:UserID" json:"author,omitempty"`
 }

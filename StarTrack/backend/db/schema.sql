@@ -97,21 +97,29 @@ CREATE INDEX IF NOT EXISTS idx_checkins_restaurant ON checkins (restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_checkins_user_verified ON checkins (user_id, verified, verified_at);
 
 -- ---------------------------------------------------------------------
--- reviews — only postable by a user with a verified checkin at the
--- restaurant within the last 7 days (enforced in the API layer).
+-- reviews — one per (user, checkin): postable only against a verified
+-- checkin the user owns, so a second visit unlocks a second review slot.
+-- checkin_id is nullable only so rows written before this column existed
+-- keep loading. Soft-deleted via deleted_at (edit/delete are user-owned,
+-- enforced in the API layer).
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS reviews (
     id               BIGSERIAL PRIMARY KEY,
     restaurant_id    BIGINT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
     user_id          BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    checkin_id       BIGINT REFERENCES checkins(id) ON DELETE SET NULL,
     rating           SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
     comment          TEXT NOT NULL,
     food_photo_label VARCHAR(255),
     menu_label       VARCHAR(255),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at       TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_restaurant ON reviews (restaurant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reviews_user ON reviews (user_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_checkin ON reviews (checkin_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_deleted_at ON reviews (deleted_at);
 
 -- ---------------------------------------------------------------------
 -- badges — catalog of achievements; unlock rules are evaluated in Go

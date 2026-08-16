@@ -60,16 +60,41 @@ export function setUnauthorizedHandler(handler) {
   unauthorizedHandler = handler;
 }
 
-async function request(path, { method = 'GET', body, auth = false } = {}) {
+// Thrown only when we genuinely don't know what happened server-side (the
+// request never got a response at all — dropped connection, timeout). A
+// handler can catch this specifically to warn "this may have gone through
+// anyway" instead of treating it the same as a clean rejection from the
+// backend (bad signature, cooldown, etc.), which throws a plain Error below.
+export class NetworkError extends Error {}
+
+const DEFAULT_TIMEOUT_MS = 15000;
+
+async function request(path, { method = 'GET', body, auth = false, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth && authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new NetworkError(
+      err.name === 'AbortError'
+        ? 'Request timed out — the server took too long to respond.'
+        : (err.message || 'Network request failed.')
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && auth) {
@@ -93,6 +118,10 @@ export const api = {
     request(`/restaurants/${restaurantId}/review-eligibility`, { auth: true }),
   createReview: (restaurantId, payload) =>
     request(`/restaurants/${restaurantId}/reviews`, { method: 'POST', body: payload, auth: true }),
+  updateReview: (reviewId, payload) =>
+    request(`/reviews/${reviewId}`, { method: 'PUT', body: payload, auth: true }),
+  deleteReview: (reviewId) =>
+    request(`/reviews/${reviewId}`, { method: 'DELETE', auth: true }),
 
   // Simulates reading a physical NFC tag (which would already be etched
   // with {tag_id, signature} at provisioning time). Real hardware would

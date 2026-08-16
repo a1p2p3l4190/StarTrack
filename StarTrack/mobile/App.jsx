@@ -1,11 +1,11 @@
 // App.jsx
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Clipboard, ScrollView, Text, View, Pressable } from 'react-native';
+import { ActivityIndicator, Alert, Clipboard, Platform, ScrollView, Text, View, Pressable } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import NetInfo from '@react-native-community/netinfo';
 
-import { api, setAuthToken, loadStoredAuthToken, setUnauthorizedHandler } from './api';
+import { api, setAuthToken, loadStoredAuthToken, setUnauthorizedHandler, NetworkError } from './api';
 import { styles } from './styles';
 import { computeBillDetails, filterRestaurants, computeCuisineBreakdown, mapCheckinMessage } from './utils';
 import CheckinResultModal from './components/CheckinResultModal';
@@ -174,7 +174,23 @@ export default function App() {
       }
     } catch (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      setCheckinResult({ kind: 'error', message: mapCheckinMessage(err.message) });
+      if (err instanceof NetworkError) {
+        // We never got a response, so the server may well have completed the
+        // checkin anyway (this is exactly what happened in the incident that
+        // prompted this: the write succeeded but the reply never arrived).
+        // Refresh so the Passport reflects reality instead of leaving the
+        // user to assume it failed and immediately retry.
+        await refreshCheckinData().catch(() => {});
+        setCheckinResult({
+          kind: 'error',
+          message: "Connection hiccup talking to the server — this check-in may have already gone through. We've refreshed your Passport, so check there before scanning again.",
+        });
+      } else {
+        // A thrown Error here means the backend responded and rejected the
+        // request on purpose (bad signature, disabled device, cooldown) —
+        // that's a real "not verified" outcome, not a network exception.
+        setCheckinResult({ kind: 'failure', message: mapCheckinMessage(err.message) });
+      }
     } finally {
       setScanning(false);
     }
@@ -187,9 +203,20 @@ export default function App() {
       setCheckinResult({ kind: 'offline', message: "You're offline — reconnect to verify your check-in." });
       return;
     }
+    const confirmMessage = `Prepare to scan physical dining tag at "${selectedRestaurant.name}"?`;
+
+    // react-native-web's Alert.alert() is a no-op, so its buttons never fire
+    // there — fall back to window.confirm on web instead.
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMessage)) {
+        performCheckIn(selectedRestaurant);
+      }
+      return;
+    }
+
     Alert.alert(
       'Confirm NFC Session',
-      `Prepare to scan physical dining tag at "${selectedRestaurant.name}"?`,
+      confirmMessage,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Begin Polling', onPress: () => performCheckIn(selectedRestaurant) }
@@ -235,6 +262,7 @@ export default function App() {
         <StatusBar style="light" />
         <RestaurantDetailScreen
           restaurant={detailTarget}
+          currentUser={currentUser}
           onClose={() => setDetailTarget(null)}
         />
       </View>

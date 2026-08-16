@@ -181,6 +181,39 @@ func TestVerifyCheckin_Unlocks3StarConnoisseurBadge(t *testing.T) {
 	}
 }
 
+// TestVerifyCheckin_CooldownRejectsImmediateRetry guards against a real
+// incident: a network hiccup can make a checkin that actually succeeded look
+// like it failed on the client, and the user retries — this must not
+// double-award score/badges for what was one visit.
+func TestVerifyCheckin_CooldownRejectsImmediateRetry(t *testing.T) {
+	router, _ := newTestApp(t)
+	restaurant, device := seedCheckinFixture(t)
+	token, _ := registerUser(t, router, "laura@example.com", "hunter22", "Laura Liu")
+
+	req := verifyCheckinRequest{
+		TagID:        device.TagID,
+		Signature:    computeSignature(device.TagID, device.Salt),
+		LocationLat:  restaurant.LocationLat,
+		LocationLong: restaurant.LocationLong,
+	}
+
+	first := doRequest(t, router, http.MethodPost, "/api/checkins/verify", token, req)
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected first checkin to succeed, got %d: %s", first.Code, first.Body.String())
+	}
+
+	retry := doRequest(t, router, http.MethodPost, "/api/checkins/verify", token, req)
+	if retry.Code != http.StatusConflict {
+		t.Fatalf("expected 409 retrying right after a verified checkin, got %d: %s", retry.Code, retry.Body.String())
+	}
+
+	var user User
+	db.Where("email = ?", "laura@example.com").First(&user)
+	if user.Score != restaurant.Stars*10 {
+		t.Errorf("expected score to be awarded only once (%d), got %d", restaurant.Stars*10, user.Score)
+	}
+}
+
 func TestPassport_ReflectsVerifiedCheckin(t *testing.T) {
 	router, _ := newTestApp(t)
 	restaurant, device := seedCheckinFixture(t)
