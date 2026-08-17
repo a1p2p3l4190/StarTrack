@@ -279,12 +279,6 @@ export default function ProfileScreen({ currentUser, onUserUpdated, onLogout }) 
 
       {renderSettingSection('Social links', 'Add links that help people connect with you outside the app.', (
         <View style={{ width: '100%', gap: 12 }}>
-          <Text style={styles.inputLabel}>Profile Photo</Text>
-          <Text style={{ color: '#9a968d', fontSize: 12, marginBottom: 4 }}>Uploaded from your gallery and saved locally with an optional remote backup.</Text>
-          <Pressable onPress={handleAvatarUpload} style={[styles.copyShareButton, { marginTop: 0, backgroundColor: '#1d1f26', borderWidth: 1, borderColor: '#4d3c21' }]}>
-            {uploadingAvatar ? <ActivityIndicator color="#d2a14c" /> : <Text style={[styles.copyShareButtonText, { color: '#f6d8a1' }]}>Change Photo</Text>}
-          </Pressable>
-
           <Text style={styles.inputLabel}>Website</Text>
           <TextInput style={[styles.input, { marginBottom: 2 }]} value={website} onChangeText={setWebsite} placeholder="https://example.com" autoCapitalize="none" />
 

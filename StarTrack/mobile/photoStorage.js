@@ -1,7 +1,7 @@
 // photoStorage.js — generic image pick/save/upload used by both profile
 // avatars (avatarStorage.js) and review photos. Extracted so a second photo
 // use case doesn't mean copy-pasting the whole avatar flow.
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 
