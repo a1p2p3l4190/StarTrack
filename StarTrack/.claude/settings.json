@@ -6,7 +6,12 @@
       "Bash(node node_modules/jest/bin/jest.js --version)",
       "Bash(npm test *)",
       "Bash(node drive5.js)",
-      "Bash(taskkill //PID 37716 //F)"
+      "Bash(taskkill //PID 37716 //F)",
+      "Bash(node \"C:\\\\Users\\\\a1p2p\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-a1p2p-OneDrive-------------msis-Course-project-StarTrack-StarTrack\\\\2d4d7cac-990e-4caf-842a-6aed6b48548f\\\\scratchpad\\\\verify_hours.mjs\")",
+      "Bash(node verify_hours.mjs)",
+      "Bash(curl -s http://localhost:8081/)",
+      "Read(//tmp/**)",
+      "Bash(curl -sf http://localhost:4173)"
     ]
   }
 }

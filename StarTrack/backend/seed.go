@@ -19,11 +19,11 @@ func seedRestaurantsAndDevices() {
 	}
 
 	restaurants := []Restaurant{
-		{Name: "Aurum Table", Stars: 3, Country: "USA", City: "Chicago", Address: "900 N Michigan Ave", Cuisine: "Contemporary", YearAwarded: 2026, LocationLat: 41.8984, LocationLong: -87.6242},
-		{Name: "Celeste Bistro", Stars: 2, Country: "USA", City: "New York", Address: "120 W 57th St", Cuisine: "French", YearAwarded: 2025, LocationLat: 40.7649, LocationLong: -73.9793},
-		{Name: "Miroir Lounge", Stars: 1, Country: "USA", City: "San Francisco", Address: "420 Market St", Cuisine: "Modern Asian", YearAwarded: 2026, LocationLat: 37.7936, LocationLong: -122.3965},
-		{Name: "L'Atelier d'Or", Stars: 3, Country: "France", City: "Paris", Address: "5 Avenue Montaigne", Cuisine: "French", YearAwarded: 2026, LocationLat: 48.8656, LocationLong: 2.3036},
-		{Name: "Den Tokyo", Stars: 2, Country: "Japan", City: "Tokyo", Address: "1-1 Marunouchi", Cuisine: "Modern Asian", YearAwarded: 2025, LocationLat: 35.6812, LocationLong: 139.7671},
+		{Name: "Aurum Table", Stars: 3, Country: "USA", City: "Chicago", Address: "900 N Michigan Ave", Cuisine: "Contemporary", YearAwarded: 2026, PriceTier: 2, LocationLat: 41.8984, LocationLong: -87.6242},
+		{Name: "Celeste Bistro", Stars: 2, Country: "USA", City: "New York", Address: "120 W 57th St", Cuisine: "French", YearAwarded: 2025, PriceTier: 3, LocationLat: 40.7649, LocationLong: -73.9793},
+		{Name: "Miroir Lounge", Stars: 1, Country: "USA", City: "San Francisco", Address: "420 Market St", Cuisine: "Modern Asian", YearAwarded: 2026, PriceTier: 2, LocationLat: 37.7936, LocationLong: -122.3965},
+		{Name: "L'Atelier d'Or", Stars: 3, Country: "France", City: "Paris", Address: "5 Avenue Montaigne", Cuisine: "French", YearAwarded: 2026, PriceTier: 3, LocationLat: 48.8656, LocationLong: 2.3036},
+		{Name: "Den Tokyo", Stars: 2, Country: "Japan", City: "Tokyo", Address: "1-1 Marunouchi", Cuisine: "Modern Asian", YearAwarded: 2025, PriceTier: 2, LocationLat: 35.6812, LocationLong: 139.7671},
 	}
 	db.Create(&restaurants)
 
@@ -35,6 +35,15 @@ func seedRestaurantsAndDevices() {
 		{TagID: "TAG-STAR-005", RestaurantID: restaurants[4].ID, Salt: "jade-salt-2025"},
 	}
 	db.Create(&devices)
+
+	// Default weekly hours (daily 11:00-22:00) for every seeded restaurant.
+	var hours []RestaurantHours
+	for _, r := range restaurants {
+		for day := 0; day <= 6; day++ {
+			hours = append(hours, RestaurantHours{RestaurantID: r.ID, DayOfWeek: day, OpenTime: "11:00", CloseTime: "22:00"})
+		}
+	}
+	db.Create(&hours)
 }
 
 func seedBadges() {

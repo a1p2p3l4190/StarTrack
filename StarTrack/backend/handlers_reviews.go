@@ -1,34 +1,66 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-type reviewResponse struct {
-	ID             uint      `json:"id"`
-	RestaurantID   uint      `json:"restaurant_id"`
-	UserID         uint      `json:"user_id"`
-	CheckinID      *uint     `json:"checkin_id"`
-	Author         string    `json:"author"`
-	Rating         int       `json:"rating"`
-	Comment        string    `json:"comment"`
-	FoodPhotoLabel string    `json:"food_photo_label"`
-	MenuLabel      string    `json:"menu_label"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+type reviewPhotoInput struct {
+	URL   string `json:"url" binding:"required"`
+	Label string `json:"label"`
 }
 
-func toReviewResponse(r Review, authorName string) reviewResponse {
+type reviewPhotoResponse struct {
+	ID    uint   `json:"id"`
+	URL   string `json:"url"`
+	Label string `json:"label"`
+}
+
+type reviewResponse struct {
+	ID           uint                  `json:"id"`
+	RestaurantID uint                  `json:"restaurant_id"`
+	UserID       uint                  `json:"user_id"`
+	CheckinID    *uint                 `json:"checkin_id"`
+	Author       string                `json:"author"`
+	Rating       int                   `json:"rating"`
+	Comment      string                `json:"comment"`
+	Photos       []reviewPhotoResponse `json:"photos"`
+	CreatedAt    time.Time             `json:"created_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
+}
+
+func toReviewResponse(r Review, authorName string, photos []ReviewPhoto) reviewResponse {
+	photoOut := make([]reviewPhotoResponse, 0, len(photos))
+	for _, p := range photos {
+		photoOut = append(photoOut, reviewPhotoResponse{ID: p.ID, URL: p.URL, Label: p.Label})
+	}
 	return reviewResponse{
 		ID: r.ID, RestaurantID: r.RestaurantID, UserID: r.UserID, CheckinID: r.CheckInID,
-		Author: authorName, Rating: r.Rating, Comment: r.Comment,
-		FoodPhotoLabel: r.FoodPhotoLabel, MenuLabel: r.MenuLabel,
+		Author: authorName, Rating: r.Rating, Comment: r.Comment, Photos: photoOut,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
+}
+
+// createReviewPhotos inserts photo rows for a review, skipping blank URLs,
+// and returns the rows so callers can build a response without a re-query.
+func createReviewPhotos(reviewID uint, inputs []reviewPhotoInput) []ReviewPhoto {
+	photos := make([]ReviewPhoto, 0, len(inputs))
+	for i, in := range inputs {
+		url := strings.TrimSpace(in.URL)
+		if url == "" {
+			continue
+		}
+		photos = append(photos, ReviewPhoto{ReviewID: reviewID, URL: url, Label: strings.TrimSpace(in.Label), Position: i})
+	}
+	if len(photos) > 0 {
+		db.Create(&photos)
+	}
+	return photos
 }
 
 func listReviewsHandler(c *gin.Context) {
@@ -36,11 +68,24 @@ func listReviewsHandler(c *gin.Context) {
 	var reviews []Review
 	db.Preload("Author").Where("restaurant_id = ?", restaurantID).Order("created_at desc").Find(&reviews)
 
+	reviewIDs := make([]uint, 0, len(reviews))
+	for _, r := range reviews {
+		reviewIDs = append(reviewIDs, r.ID)
+	}
+	var photos []ReviewPhoto
+	if len(reviewIDs) > 0 {
+		db.Where("review_id IN ?", reviewIDs).Order("position asc, id asc").Find(&photos)
+	}
+	photosByReview := make(map[uint][]ReviewPhoto, len(reviews))
+	for _, p := range photos {
+		photosByReview[p.ReviewID] = append(photosByReview[p.ReviewID], p)
+	}
+
 	out := make([]reviewResponse, 0, len(reviews))
 	for _, r := range reviews {
-		out = append(out, toReviewResponse(r, r.Author.DisplayName))
+		out = append(out, toReviewResponse(r, r.Author.DisplayName, photosByReview[r.ID]))
 	}
-	c.JSON(http.StatusOK, gin.H{"reviews": out})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"reviews": out})
 }
 
 type reviewableVisit struct {
@@ -77,15 +122,14 @@ func reviewEligibilityHandler(c *gin.Context) {
 		visits = append(visits, reviewableVisit{CheckinID: ci.ID, VerifiedAt: *ci.VerifiedAt})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"eligible": len(visits) > 0, "reviewable_visits": visits})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"eligible": len(visits) > 0, "reviewable_visits": visits})
 }
 
 type createReviewRequest struct {
-	CheckinID      uint   `json:"checkin_id" binding:"required"`
-	Rating         int    `json:"rating"`
-	Comment        string `json:"comment" binding:"required"`
-	FoodPhotoLabel string `json:"food_photo_label"`
-	MenuLabel      string `json:"menu_label"`
+	CheckinID uint               `json:"checkin_id" binding:"required"`
+	Rating    int                `json:"rating" binding:"required,min=1,max=5"`
+	Comment   string             `json:"comment" binding:"required"`
+	Photos    []reviewPhotoInput `json:"photos"`
 }
 
 func createReviewHandler(c *gin.Context) {
@@ -94,46 +138,42 @@ func createReviewHandler(c *gin.Context) {
 
 	var req createReviewRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
-	}
-	if req.Rating < 1 || req.Rating > 5 {
-		req.Rating = 5
 	}
 
 	var restaurant Restaurant
 	if err := db.First(&restaurant, restaurantID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "restaurant not found"})
+		RespondNotFound(c, "Restaurant not found")
 		return
 	}
 
 	var checkin CheckIn
 	if err := db.Where("id = ? AND user_id = ? AND restaurant_id = ? AND verified = ?", req.CheckinID, userID, restaurant.ID, true).
 		First(&checkin).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "a verified checkin at this restaurant is required to review it"})
+		RespondForbidden(c, "A verified checkin at this restaurant is required to review it")
 		return
 	}
 
 	var alreadyReviewed int64
 	db.Model(&Review{}).Where("checkin_id = ? AND user_id = ?", checkin.ID, userID).Count(&alreadyReviewed)
 	if alreadyReviewed > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "you've already reviewed this visit — edit that review instead"})
+		RespondConflict(c, "You've already reviewed this visit — edit that review instead")
 		return
 	}
 
 	review := Review{
-		RestaurantID:   restaurant.ID,
-		UserID:         userID,
-		CheckInID:      &checkin.ID,
-		Rating:         req.Rating,
-		Comment:        req.Comment,
-		FoodPhotoLabel: req.FoodPhotoLabel,
-		MenuLabel:      req.MenuLabel,
+		RestaurantID: restaurant.ID,
+		UserID:       userID,
+		CheckInID:    &checkin.ID,
+		Rating:       req.Rating,
+		Comment:      req.Comment,
 	}
 	if err := db.Create(&review).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to create review")
 		return
 	}
+	photos := createReviewPhotos(review.ID, req.Photos)
 
 	db.Model(&User{}).Where("id = ?", userID).UpdateColumn("score", gorm.Expr("score + ?", 5))
 	newBadges := evaluateBadgesForUser(userID)
@@ -141,17 +181,125 @@ func createReviewHandler(c *gin.Context) {
 	var author User
 	db.First(&author, userID)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"review":     toReviewResponse(review, author.DisplayName),
+	// Create notification for review creation
+	db.Create(&Notification{
+		UserID:  userID,
+		Kind:    "review",
+		Title:   "Review posted at " + restaurant.Name,
+		Message: fmt.Sprintf("Your %d-star review has been shared with the community.", req.Rating),
+	})
+
+	RespondSuccess(c, http.StatusCreated, map[string]interface{}{
+		"review":     toReviewResponse(review, author.DisplayName, photos),
 		"new_badges": newBadges,
 	})
 }
 
 type updateReviewRequest struct {
-	Rating         int    `json:"rating"`
-	Comment        string `json:"comment" binding:"required"`
-	FoodPhotoLabel string `json:"food_photo_label"`
-	MenuLabel      string `json:"menu_label"`
+	Rating  int                `json:"rating" binding:"required,min=1,max=5"`
+	Comment string             `json:"comment" binding:"required"`
+	Photos  []reviewPhotoInput `json:"photos"`
+}
+
+type reviewReportRequest struct {
+	Reason  string `json:"reason" binding:"required,oneof=spam abusive offensive false_info other"`
+	Details string `json:"details"`
+}
+
+func listReviewReportsHandler(c *gin.Context) {
+	var reports []ReviewReport
+	if err := db.Order("created_at desc").Find(&reports).Error; err != nil {
+		RespondInternalError(c, "Failed to fetch review reports")
+		return
+	}
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"reports": reports})
+}
+
+func reportReviewHandler(c *gin.Context) {
+	userID := currentUserID(c)
+	var review Review
+	if err := db.First(&review, c.Param("id")).Error; err != nil {
+		RespondNotFound(c, "Review not found")
+		return
+	}
+
+	var req reviewReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
+		return
+	}
+
+	var existingOpen int64
+	db.Model(&ReviewReport{}).Where("review_id = ? AND user_id = ? AND status = ?", review.ID, userID, "open").Count(&existingOpen)
+	if existingOpen > 0 {
+		RespondConflict(c, "You've already reported this review — it's pending moderator review")
+		return
+	}
+
+	report := ReviewReport{
+		ReviewID: review.ID,
+		UserID:   userID,
+		Reason:   req.Reason,
+		Details:  req.Details,
+		Status:   "open",
+	}
+	if err := db.Create(&report).Error; err != nil {
+		RespondInternalError(c, "Failed to create review report")
+		return
+	}
+
+	RespondSuccess(c, http.StatusCreated, map[string]interface{}{"report": report, "status": "open"})
+}
+
+type resolveReviewReportRequest struct {
+	Action string `json:"action" binding:"required,oneof=dismiss delete_review"`
+}
+
+// resolveReviewReportHandler allows admins to dismiss reports or delete the flagged review.
+func resolveReviewReportHandler(c *gin.Context) {
+	var report ReviewReport
+	if err := db.First(&report, c.Param("id")).Error; err != nil {
+		RespondNotFound(c, "Report not found")
+		return
+	}
+
+	var req resolveReviewReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
+		return
+	}
+
+	if req.Action == "dismiss" {
+		report.Status = "dismissed"
+		if err := db.Save(&report).Error; err != nil {
+			RespondInternalError(c, "Failed to dismiss report")
+			return
+		}
+		logAuditEvent(c, "DISMISS_REVIEW_REPORT", "review_report", &report.ID, fmt.Sprintf("report_id=%d", report.ID))
+	} else if req.Action == "delete_review" {
+		var review Review
+		if err := db.First(&review, report.ReviewID).Error; err != nil {
+			RespondNotFound(c, "Review not found")
+			return
+		}
+
+		// Soft delete the review
+		if err := db.Delete(&review).Error; err != nil {
+			RespondInternalError(c, "Failed to delete review")
+			return
+		}
+
+		// Mark report as resolved
+		report.Status = "resolved"
+		if err := db.Save(&report).Error; err != nil {
+			RespondInternalError(c, "Failed to update report status")
+			return
+		}
+
+		logAuditEvent(c, "DELETE_REPORTED_REVIEW", "review", &review.ID, fmt.Sprintf("report_id=%d", report.ID))
+	}
+
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"report": report, "action": req.Action})
 }
 
 func updateReviewHandler(c *gin.Context) {
@@ -159,45 +307,47 @@ func updateReviewHandler(c *gin.Context) {
 
 	var review Review
 	if err := db.Where("id = ? AND user_id = ?", c.Param("id"), userID).First(&review).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
+		RespondNotFound(c, "Review not found")
 		return
 	}
 
 	var req updateReviewRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
-	}
-	if req.Rating < 1 || req.Rating > 5 {
-		req.Rating = review.Rating
 	}
 
 	review.Rating = req.Rating
 	review.Comment = req.Comment
-	review.FoodPhotoLabel = req.FoodPhotoLabel
-	review.MenuLabel = req.MenuLabel
 	if err := db.Save(&review).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to update review")
 		return
 	}
 
+	// Photos are fully replaced on each edit — simplest correct way to
+	// support add/remove/reorder without diffing old vs new.
+	db.Where("review_id = ?", review.ID).Delete(&ReviewPhoto{})
+	photos := createReviewPhotos(review.ID, req.Photos)
+
 	var author User
 	db.First(&author, userID)
-	c.JSON(http.StatusOK, gin.H{"review": toReviewResponse(review, author.DisplayName)})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"review": toReviewResponse(review, author.DisplayName, photos)})
 }
 
 // deleteReviewHandler soft-deletes (via Review.DeletedAt) so the review
 // disappears from every normal query but stays recoverable at the DB level.
 func deleteReviewHandler(c *gin.Context) {
 	userID := currentUserID(c)
-	result := db.Where("id = ? AND user_id = ?", c.Param("id"), userID).Delete(&Review{})
+	reviewID := c.Param("id")
+	result := db.Where("id = ? AND user_id = ?", reviewID, userID).Delete(&Review{})
 	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		RespondInternalError(c, "Failed to delete review")
 		return
 	}
 	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "review not found"})
+		RespondNotFound(c, "Review not found")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"deleted": c.Param("id")})
+	db.Where("review_id = ?", reviewID).Delete(&ReviewPhoto{})
+	RespondSuccess(c, http.StatusOK, map[string]string{"deleted": reviewID})
 }

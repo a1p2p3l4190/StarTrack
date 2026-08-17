@@ -101,17 +101,35 @@ async function request(path, { method = 'GET', body, auth = false, timeoutMs = D
       await setAuthToken(null);
       if (unauthorizedHandler) unauthorizedHandler();
     }
-    throw new Error(data.error || `Request failed (${res.status})`);
+    // StandardResponse format: {success: false, error: {code, message, retry_after?}}
+    const errorMsg = data?.error?.message || data.error || `Request failed (${res.status})`;
+    const error = new Error(errorMsg);
+    error.code = data?.error?.code || 'UNKNOWN_ERROR';
+    error.statusCode = res.status;
+    if (data?.error?.retry_after) error.retryAfter = data.error.retry_after;
+    throw error;
   }
-  return data;
+  // StandardResponse format: {success: true, data, meta?, error?}
+  // For backwards compatibility, return data directly but preserve meta if present
+  const result = data.data !== undefined ? data.data : data;
+  if (data.meta) result._meta = data.meta;
+  return result;
 }
 
 export const api = {
   register: (payload) => request('/auth/register', { method: 'POST', body: payload }),
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
   me: () => request('/auth/me', { auth: true }),
+  updateMe: (payload) => request('/auth/me', { method: 'PUT', body: payload, auth: true }),
+  changePassword: (payload) => request('/auth/change-password', { method: 'POST', body: payload, auth: true }),
+  forgotPassword: (payload) => request('/auth/forgot-password', { method: 'POST', body: payload }),
+  resetPassword: (payload) => request('/auth/reset-password', { method: 'POST', body: payload }),
+  sendVerificationEmail: () => request('/auth/send-verification-email', { method: 'POST', auth: true }),
+  verifyEmail: (payload) => request('/auth/verify-email', { method: 'POST', body: payload }),
+  deleteAccount: (payload) => request('/auth/me', { method: 'DELETE', body: payload, auth: true }),
 
   restaurants: () => request('/restaurants'),
+  restaurant: (id) => request(`/restaurants/${id}`),
 
   reviews: (restaurantId) => request(`/restaurants/${restaurantId}/reviews`),
   reviewEligibility: (restaurantId) =>
@@ -137,4 +155,13 @@ export const api = {
   wishlist: () => request('/wishlist', { auth: true }),
   addWishlist: (payload) => request('/wishlist', { method: 'POST', body: payload, auth: true }),
   removeWishlist: (id) => request(`/wishlist/${id}`, { method: 'DELETE', auth: true }),
+
+  socialStats: (userId) => request(`/social/users/${userId}/stats`, { auth: true }),
+  toggleFollow: (userId) => request(`/social/users/${userId}/follow`, { method: 'POST', auth: true }),
+  badgeWall: (userId) => request(`/social/users/${userId}/badge-wall`, { auth: true }),
+  reportReview: (reviewId, payload) => request(`/reviews/${reviewId}/report`, { method: 'POST', body: payload, auth: true }),
+
+  notifications: () => request('/notifications', { auth: true }),
+  markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'POST', auth: true }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST', auth: true }),
 };

@@ -1,4 +1,6 @@
-const API_BASE = 'http://localhost:8081/api'
+// Use the deployed backend URL in production while keeping local development
+// convenient when no Vite environment variable is configured.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api'
 const TOKEN_KEY = 'startrack_admin_token'
 
 export function getToken() {
@@ -33,9 +35,26 @@ async function request(path, { method = 'GET', body, auth = false } = {}) {
       setToken(null)
       window.location.reload()
     }
-    throw new Error(data.error || `Request failed (${res.status})`)
+    // StandardResponse format: {success: false, error: {code, message, details?, retry_after?}}
+    const errorMsg = data?.error?.message || data.error || `Request failed (${res.status})`
+    const error = new Error(errorMsg)
+    error.code = data?.error?.code || 'UNKNOWN_ERROR'
+    error.statusCode = res.status
+    if (data?.error?.retry_after) error.retryAfter = data.error.retry_after
+    throw error
   }
-  return data
+  // StandardResponse format: {success: true, data, meta?, error?}
+  // For backwards compatibility, return data directly but preserve meta if present
+  const result = data.data !== undefined ? data.data : data
+  if (data.meta) result._meta = data.meta
+  // Pagination (page/limit/total) rides as top-level siblings of "data" in
+  // the raw response, not inside it — callers like fetchRestaurantTable
+  // read `data.total` directly, so it has to be copied onto the unwrapped
+  // result or it's silently lost and pagination always reads as empty.
+  if (data.total !== undefined) result.total = data.total
+  if (data.page !== undefined) result.page = data.page
+  if (data.limit !== undefined) result.limit = data.limit
+  return result
 }
 
 export const api = {
@@ -49,6 +68,28 @@ export const api = {
   createRestaurant: (payload) => request('/restaurants', { method: 'POST', body: payload, auth: true }),
   updateRestaurant: (id, payload) => request(`/restaurants/${id}`, { method: 'PUT', body: payload, auth: true }),
   deleteRestaurant: (id) => request(`/restaurants/${id}`, { method: 'DELETE', auth: true }),
+  restaurant: (id) => request(`/restaurants/${id}`),
+  updateRestaurantStarHistory: (id, history) => request(`/restaurants/${id}/star-history`, { method: 'PUT', body: { history }, auth: true }),
+  updateRestaurantHours: (id, hours) => request(`/restaurants/${id}/hours`, { method: 'PUT', body: { hours }, auth: true }),
+  // Multipart upload — can't go through request() since that always
+  // JSON-encodes the body. No explicit Content-Type here either: the
+  // browser sets the multipart boundary itself.
+  uploadRestaurantPhoto: async (file) => {
+    const form = new FormData()
+    form.append('photo', file)
+    const res = await fetch(`${API_BASE}/uploads/photo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: form,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const error = new Error(data?.error?.message || `Upload failed (${res.status})`)
+      error.code = data?.error?.code || 'UNKNOWN_ERROR'
+      throw error
+    }
+    return data.data
+  },
 
   nfcDevices: () => request('/nfc-devices', { auth: true }),
   createNfcDevice: (payload) => request('/nfc-devices', { method: 'POST', body: payload, auth: true }),
@@ -70,6 +111,8 @@ export const api = {
 
   adminStats: () => request('/admin/stats', { auth: true }),
   auditLogs: () => request('/audit-logs', { auth: true }),
+  reports: () => request('/reports', { auth: true }),
+  resolveReport: (id, payload) => request(`/reports/${id}/resolve`, { method: 'PATCH', body: payload, auth: true }),
 
   cities: () => request('/cities', { auth: true }),
   createCity: (payload) => request('/cities', { method: 'POST', body: payload, auth: true }),

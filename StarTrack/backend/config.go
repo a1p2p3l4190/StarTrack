@@ -12,6 +12,15 @@ type Config struct {
 	S3Region    string
 	JWTSecret   string
 	Port        string
+
+	// SMTP* are all optional. When SMTPHost is empty, sendEmail falls back
+	// to logging the message instead of failing — this environment has no
+	// mail account provisioned, but a real deployment just sets these.
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 func loadConfig() (*Config, error) {
@@ -25,6 +34,12 @@ func loadConfig() (*Config, error) {
 		// 8080 is a common collision (Apache/XAMPP, other dev servers); 8081
 		// is just a less-contested default, override with PORT if needed.
 		Port: getEnv("PORT", "8081"),
+
+		SMTPHost:     getEnv("SMTP_HOST", ""),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUsername: getEnv("SMTP_USERNAME", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", "StarTrack <no-reply@startrack.app>"),
 	}
 
 	if cfg.DatabaseURL == "" {

@@ -58,7 +58,7 @@ func adminStatsHandler(c *gin.Context) {
 		Limit(5).
 		Scan(&top)
 
-	c.JSON(http.StatusOK, gin.H{
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{
 		"total_checkins":    totalCheckins,
 		"verified_checkins": verifiedCheckins,
 		"total_users":       totalUsers,

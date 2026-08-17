@@ -27,6 +27,21 @@ function formatShortDate(iso) {
   return `${Number(month)}/${Number(day)}`
 }
 
+// Generates round, evenly-spaced integer ticks sized to the data's max
+// value (e.g. maxValue=8 -> 0/2/4/6/8), rather than leaving recharts'
+// default "nice ticks" pass to pick an arbitrary count/step. The top tick
+// is always the smallest multiple of `step` that is >= maxValue, so every
+// data point is covered without an extra, inconsistently-sized step of
+// headroom tacked on beyond it.
+function niceIntegerTicks(maxValue) {
+  const max = Math.max(1, Math.ceil(maxValue))
+  const step = Math.max(1, Math.ceil(max / 4))
+  const top = Math.ceil(max / step) * step
+  const ticks = []
+  for (let t = 0; t <= top; t += step) ticks.push(t)
+  return ticks
+}
+
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload || payload.length === 0) return null
   return (
@@ -46,12 +61,20 @@ function ChartTooltip({ active, payload, label }) {
 // (muted, dashed) so the gap between the two reads as the failure rate.
 export function CheckinTrendChart({ data }) {
   const formatted = useMemo(() => data.map((d) => ({ ...d, label: formatShortDate(d.date) })), [data])
+  const ticks = useMemo(() => {
+    const maxValue = formatted.reduce((max, d) => Math.max(max, d.total ?? 0, d.verified ?? 0), 0)
+    return niceIntegerTicks(maxValue)
+  }, [formatted])
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <LineChart data={formatted} margin={{ top: 8, right: 16, left: -16, bottom: 0 }}>
+      {/* left: -16 (rather than 0) pulls the plot flush to the card edge —
+          it only leaves ~16px for tick text, which clips the leading digit
+          of any 2-digit tick (e.g. "16" paints as "6", "12" as "2"). Give
+          the YAxis its full declared width by zeroing the left margin. */}
+      <LineChart data={formatted} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke={GRIDLINE} vertical={false} />
         <XAxis dataKey="label" stroke={INK_MUTED} tick={{ fill: INK_MUTED, fontSize: 12 }} axisLine={{ stroke: GRIDLINE }} tickLine={false} />
-        <YAxis stroke={INK_MUTED} tick={{ fill: INK_MUTED, fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} width={32} />
+        <YAxis stroke={INK_MUTED} tick={{ fill: INK_MUTED, fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} width={36} domain={[0, ticks[ticks.length - 1]]} ticks={ticks} />
         <Tooltip content={<ChartTooltip />} cursor={{ stroke: GRIDLINE }} />
         <Legend wrapperStyle={{ fontSize: 12, color: INK_SECONDARY }} iconType="plainline" />
         <Line type="monotone" dataKey="total" name="Total attempts" stroke={SERIES_TOTAL} strokeWidth={2} strokeDasharray="4 3" dot={false} activeDot={{ r: 5 }} />

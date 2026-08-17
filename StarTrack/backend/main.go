@@ -28,8 +28,8 @@ func main() {
 	}
 
 	if err := db.AutoMigrate(
-		&User{}, &Restaurant{}, &NFCDevice{}, &CheckIn{},
-		&Review{}, &Badge{}, &UserBadge{}, &WishlistItem{}, &Anomaly{},
+		&User{}, &Follow{}, &Restaurant{}, &RestaurantStarHistory{}, &RestaurantHours{}, &NFCDevice{}, &CheckIn{},
+		&Review{}, &ReviewPhoto{}, &ReviewReport{}, &Badge{}, &UserBadge{}, &WishlistItem{}, &Notification{}, &Anomaly{},
 		&City{}, &Cuisine{}, &AdminAuditLog{},
 	); err != nil {
 		panic(err)
@@ -48,7 +48,7 @@ func setupRouter(cfg *Config) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
@@ -58,6 +58,7 @@ func setupRouter(cfg *Config) *gin.Engine {
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "StarTrack backend is running"})
 	})
+	router.Static("/uploads", "./uploads")
 
 	auth := authRequired(cfg)
 	admin := adminRequired()
@@ -77,6 +78,13 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.POST("/auth/register", registerHandler(cfg))
 		api.POST("/auth/login", loginLimiter, loginHandler(cfg))
 		api.GET("/auth/me", auth, meHandler)
+		api.PUT("/auth/me", auth, updateMeHandler)
+		api.POST("/auth/change-password", auth, changePasswordHandler(cfg))
+		api.POST("/auth/forgot-password", forgotPasswordHandler(cfg))
+		api.POST("/auth/reset-password", resetPasswordHandler)
+		api.POST("/auth/send-verification-email", auth, sendVerificationEmailHandler(cfg))
+		api.POST("/auth/verify-email", verifyEmailHandler)
+		api.DELETE("/auth/me", auth, deleteAccountHandler(cfg))
 
 		// Restaurants — public reads, admin-only writes
 		api.GET("/restaurants", listRestaurantsHandler)
@@ -84,6 +92,9 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.POST("/restaurants", auth, admin, createRestaurantHandler)
 		api.PUT("/restaurants/:id", auth, admin, updateRestaurantHandler)
 		api.DELETE("/restaurants/:id", auth, admin, deleteRestaurantHandler)
+		api.PUT("/restaurants/:id/star-history", auth, admin, updateRestaurantStarHistoryHandler)
+		api.PUT("/restaurants/:id/hours", auth, admin, updateRestaurantHoursHandler)
+		api.POST("/uploads/photo", auth, admin, uploadRestaurantPhotoHandler)
 
 		// NFC devices — admin only
 		api.GET("/nfc-devices", auth, admin, listNFCDevicesHandler)
@@ -98,6 +109,9 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.GET("/restaurants/:id/reviews", listReviewsHandler)
 		api.GET("/restaurants/:id/review-eligibility", auth, reviewEligibilityHandler)
 		api.POST("/restaurants/:id/reviews", auth, createReviewHandler)
+		api.GET("/reports", auth, admin, listReviewReportsHandler)
+		api.PATCH("/reports/:id/resolve", auth, admin, resolveReviewReportHandler)
+		api.POST("/reviews/:id/report", auth, reportReviewHandler)
 		api.PUT("/reviews/:id", auth, updateReviewHandler)
 		api.DELETE("/reviews/:id", auth, deleteReviewHandler)
 
@@ -117,6 +131,16 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.GET("/wishlist", auth, listWishlistHandler)
 		api.POST("/wishlist", auth, createWishlistHandler)
 		api.DELETE("/wishlist/:id", auth, deleteWishlistHandler)
+
+		// Social
+		api.GET("/social/users/:id/stats", auth, userSocialStatsHandler)
+		api.POST("/social/users/:id/follow", auth, toggleFollowHandler)
+		api.GET("/social/users/:id/badge-wall", auth, userBadgeWallHandler)
+
+		// Notifications / reminders
+		api.GET("/notifications", auth, listNotificationsHandler)
+		api.POST("/notifications/:id/read", auth, markNotificationReadHandler)
+		api.POST("/notifications/read-all", auth, markAllNotificationsReadHandler)
 
 		// Security dashboard — admin only
 		api.GET("/anomalies", auth, admin, listAnomaliesHandler)
@@ -150,6 +174,52 @@ func setupRouter(cfg *Config) *gin.Engine {
 
 func healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"healthy": true})
+}
+
+func listNotificationsHandler(c *gin.Context) {
+	userID := currentUserID(c)
+	var notifications []Notification
+	if err := db.Where("user_id = ?", userID).Order("created_at desc").Find(&notifications).Error; err != nil {
+		RespondInternalError(c, err.Error())
+		return
+	}
+
+	unreadCount := 0
+	for i := range notifications {
+		if notifications[i].ReadAt == nil {
+			unreadCount++
+		}
+	}
+
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"notifications": notifications, "unread_count": unreadCount})
+}
+
+func markNotificationReadHandler(c *gin.Context) {
+	userID := currentUserID(c)
+	var notification Notification
+	if err := db.Where("id = ? AND user_id = ?", c.Param("id"), userID).First(&notification).Error; err != nil {
+		RespondNotFound(c, "Notification not found")
+		return
+	}
+	if notification.ReadAt == nil {
+		now := time.Now()
+		notification.ReadAt = &now
+		if err := db.Save(&notification).Error; err != nil {
+			RespondInternalError(c, err.Error())
+			return
+		}
+	}
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"notification": notification})
+}
+
+func markAllNotificationsReadHandler(c *gin.Context) {
+	userID := currentUserID(c)
+	now := time.Now()
+	if err := db.Model(&Notification{}).Where("user_id = ? AND read_at IS NULL", userID).Update("read_at", now).Error; err != nil {
+		RespondInternalError(c, err.Error())
+		return
+	}
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"updated": true})
 }
 
 func computeSignature(tagID, salt string) string {

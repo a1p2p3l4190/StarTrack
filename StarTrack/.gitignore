@@ -14,6 +14,7 @@ pnpm-lock.yaml
 **/*.exe
 **/*.test
 **/*.out
+backend/uploads/
 
 # Secrets
 .env

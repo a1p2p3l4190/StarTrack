@@ -15,10 +15,10 @@ import (
 func simulateNfcScanHandler(c *gin.Context) {
 	var device NFCDevice
 	if err := db.Where("restaurant_id = ?", c.Param("id")).First(&device).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no NFC device registered for this restaurant"})
+		RespondNotFound(c, "No NFC device registered for this restaurant")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{
 		"tag_id":    device.TagID,
 		"signature": computeSignature(device.TagID, device.Salt),
 	})

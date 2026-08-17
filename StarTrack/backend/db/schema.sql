@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS restaurants (
     address       VARCHAR(512),
     cuisine       VARCHAR(120),
     year_awarded  INTEGER,
+    price_tier    SMALLINT     NOT NULL DEFAULT 0 CHECK (price_tier BETWEEN 0 AND 3),
     location_lat  DOUBLE PRECISION,
     location_long DOUBLE PRECISION,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -59,6 +60,23 @@ CREATE TABLE IF NOT EXISTS restaurants (
 CREATE INDEX IF NOT EXISTS idx_restaurants_stars ON restaurants (stars);
 CREATE INDEX IF NOT EXISTS idx_restaurants_city ON restaurants (city);
 CREATE INDEX IF NOT EXISTS idx_restaurants_year ON restaurants (year_awarded);
+
+-- ---------------------------------------------------------------------
+-- restaurant_hours — structured weekly schedule, one row per restaurant
+-- per day of week (0=Sunday..6=Saturday, matching JS's Date.getDay()).
+-- open_time/close_time are "HH:MM" 24-hour strings; close_time < open_time
+-- means the hours span past midnight.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS restaurant_hours (
+    id            BIGSERIAL PRIMARY KEY,
+    restaurant_id BIGINT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+    day_of_week   SMALLINT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+    is_closed     BOOLEAN NOT NULL DEFAULT false,
+    open_time     VARCHAR(5),
+    close_time    VARCHAR(5),
+    UNIQUE (restaurant_id, day_of_week)
+);
+CREATE INDEX IF NOT EXISTS idx_restaurant_hours_restaurant ON restaurant_hours (restaurant_id);
 
 -- ---------------------------------------------------------------------
 -- nfc_devices — one physical tag per restaurant, used to sign check-ins
@@ -211,13 +229,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_admin ON admin_audit_logs (admin_id);
 
 -- Restaurants (Chicago / New York / San Francisco / Paris / Tokyo — matches
 -- the mobile app's original SAMPLE_RESTAURANTS mock)
-INSERT INTO restaurants (name, stars, country, city, address, cuisine, year_awarded, location_lat, location_long)
+INSERT INTO restaurants (name, stars, country, city, address, cuisine, year_awarded, price_tier, location_lat, location_long)
 VALUES
-    ('Aurum Table',     3, 'USA',    'Chicago',       '900 N Michigan Ave', 'Contemporary',  2026, 41.8984, -87.6242),
-    ('Celeste Bistro',  2, 'USA',    'New York',      '120 W 57th St',      'French',        2025, 40.7649, -73.9793),
-    ('Miroir Lounge',   1, 'USA',    'San Francisco', '420 Market St',      'Modern Asian',  2026, 37.7936, -122.3965),
-    ('L''Atelier d''Or', 3, 'France', 'Paris',         '5 Avenue Montaigne', 'French',        2026, 48.8656, 2.3036),
-    ('Den Tokyo',       2, 'Japan',  'Tokyo',         '1-1 Marunouchi',     'Modern Asian',  2025, 35.6812, 139.7671)
+    ('Aurum Table',     3, 'USA',    'Chicago',       '900 N Michigan Ave', 'Contemporary',  2026, 2, 41.8984, -87.6242),
+    ('Celeste Bistro',  2, 'USA',    'New York',      '120 W 57th St',      'French',        2025, 3, 40.7649, -73.9793),
+    ('Miroir Lounge',   1, 'USA',    'San Francisco', '420 Market St',      'Modern Asian',  2026, 2, 37.7936, -122.3965),
+    ('L''Atelier d''Or', 3, 'France', 'Paris',         '5 Avenue Montaigne', 'French',        2026, 3, 48.8656, 2.3036),
+    ('Den Tokyo',       2, 'Japan',  'Tokyo',         '1-1 Marunouchi',     'Modern Asian',  2025, 2, 35.6812, 139.7671)
 ON CONFLICT DO NOTHING;
 
 -- NFC tags, one per restaurant, matched up by name
@@ -232,6 +250,14 @@ FROM (VALUES
 ) AS v(tag_id, restaurant_name, salt)
 JOIN restaurants r ON r.name = v.restaurant_name
 ON CONFLICT (tag_id) DO NOTHING;
+
+-- Default weekly hours (daily 11:00-22:00) for each seeded restaurant
+INSERT INTO restaurant_hours (restaurant_id, day_of_week, is_closed, open_time, close_time)
+SELECT r.id, d.day_of_week, false, '11:00', '22:00'
+FROM restaurants r
+CROSS JOIN generate_series(0, 6) AS d(day_of_week)
+WHERE r.name IN ('Aurum Table', 'Celeste Bistro', 'Miroir Lounge', 'L''Atelier d''Or', 'Den Tokyo')
+ON CONFLICT (restaurant_id, day_of_week) DO NOTHING;
 
 -- Badge catalog (matches mobile ACHIEVEMENT_BADGES); unlock state is
 -- per-user, tracked in user_badges and computed by backend/badges.go

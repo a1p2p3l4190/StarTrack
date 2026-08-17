@@ -15,12 +15,14 @@ export const styles = StyleSheet.create({
   },
   hero: {
     paddingHorizontal: 20,
-    paddingTop: 50,
-    marginBottom: 10,
+    // Compact header with enough room below the native status bar.
+    paddingTop: 32,
+    paddingBottom: 4,
+    marginBottom: 4,
   },
   title: {
     color: '#f8f1e6',
-    fontSize: 36,
+    fontSize: 30,
     fontWeight: '800',
     letterSpacing: 1,
   },
@@ -34,6 +36,12 @@ export const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 12,
     textTransform: 'uppercase',
+  },
+  brandGold: {
+    color: '#d2a14c',
+  },
+  brandGoldSoft: {
+    color: '#f8d8a3',
   },
   segmentControl: {
     flexDirection: 'row',
@@ -158,7 +166,7 @@ export const styles = StyleSheet.create({
   restaurantCard: {
     backgroundColor: '#121317',
     borderRadius: 18,
-    padding: 18,
+    padding: 12,
     borderWidth: 1,
     borderColor: '#1d1e24',
     marginBottom: 12,
@@ -166,6 +174,37 @@ export const styles = StyleSheet.create({
   restaurantCardSelected: {
     borderColor: '#d2a14c',
     backgroundColor: '#171613',
+  },
+  restaurantCardContent: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  restaurantCardImage: {
+    width: 88,
+    height: 88,
+    borderRadius: 14,
+    marginRight: 12,
+    backgroundColor: '#1b1d24',
+  },
+  restaurantCardImagePlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: 14,
+    marginRight: 12,
+    backgroundColor: '#1b1d24',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2d35',
+  },
+  restaurantCardImagePlaceholderText: {
+    color: '#d2a14c',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  restaurantCardBody: {
+    flex: 1,
+    justifyContent: 'center',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -186,6 +225,24 @@ export const styles = StyleSheet.create({
   restaurantMeta: {
     color: '#8e8982',
     fontSize: 13,
+  },
+  restaurantInfoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  restaurantInfoPill: {
+    color: '#f5dec0',
+    backgroundColor: '#1d1a15',
+    borderColor: '#3b2e1d',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 11,
+    fontWeight: '700',
+    overflow: 'hidden',
   },
   mapContainer: {
     height: 420,
@@ -311,9 +368,38 @@ export const styles = StyleSheet.create({
     borderColor: '#23232a',
   },
   wishItem: {
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#222228',
+  },
+  wishCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  wishImage: {
+    width: 62,
+    height: 62,
+    borderRadius: 12,
+    marginRight: 12,
+  },
+  wishImagePlaceholder: {
+    width: 62,
+    height: 62,
+    borderRadius: 12,
+    marginRight: 12,
+    backgroundColor: '#1a1b22',
+    borderWidth: 1,
+    borderColor: '#2b2e37',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wishImagePlaceholderText: {
+    color: '#d2a14c',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  wishContent: {
+    flex: 1,
   },
   wishName: {
     color: '#f3e8d8',
@@ -322,7 +408,12 @@ export const styles = StyleSheet.create({
   },
   wishSub: {
     color: '#bfb8ad',
-    fontSize: 13,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  wishMeta: {
+    color: '#d8b57a',
+    fontSize: 12,
     marginTop: 4,
   },
   starMapText: {
@@ -338,6 +429,11 @@ export const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1,
     borderColor: '#1d1e24',
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   inputGrid: {
     flexDirection: 'row',
@@ -496,6 +592,13 @@ export const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
     zIndex: 999,
+  },
+  floatingNfcButtonLocked: {
+    backgroundColor: '#292a30',
+    borderWidth: 1,
+    borderColor: '#4a4b53',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
   },
   floatingNfcIcon: {
     fontSize: 18,

@@ -33,8 +33,8 @@ func newTestApp(t *testing.T) (*gin.Engine, *Config) {
 	sqlDB.SetMaxOpenConns(1)
 
 	if err := testDB.AutoMigrate(
-		&User{}, &Restaurant{}, &NFCDevice{}, &CheckIn{},
-		&Review{}, &Badge{}, &UserBadge{}, &WishlistItem{}, &Anomaly{},
+		&User{}, &Follow{}, &Restaurant{}, &RestaurantStarHistory{}, &RestaurantHours{}, &NFCDevice{}, &CheckIn{},
+		&Review{}, &ReviewPhoto{}, &ReviewReport{}, &Badge{}, &UserBadge{}, &WishlistItem{}, &Notification{}, &Anomaly{},
 		&City{}, &Cuisine{}, &AdminAuditLog{},
 	); err != nil {
 		t.Fatalf("failed to migrate test db: %v", err)

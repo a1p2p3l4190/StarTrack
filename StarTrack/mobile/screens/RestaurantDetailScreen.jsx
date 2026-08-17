@@ -1,21 +1,67 @@
 // screens/RestaurantDetailScreen.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Alert, Keyboard, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Keyboard, ActivityIndicator, Platform, Image, Alert, Linking } from 'react-native';
 import { styles } from '../styles';
 import { api } from '../api';
+import { isRestaurantOpen, formatHoursEntry, summarizeTodayHours } from '../utils';
+import { pickImages, uploadImages } from '../photoStorage';
+import { ReviewCardSkeleton } from '../components/Shimmer';
+import { ErrorMessage, Toast, EmptyState } from '../components/ErrorDisplay';
 
 const formatDate = (iso) => new Date(iso).toISOString().split('T')[0];
 
+const RESERVATION_PLATFORM_META = {
+  opentable: { icon: '🍽️', label: 'Reserve on OpenTable' },
+  resy: { icon: '📅', label: 'Reserve on Resy' },
+  website: { icon: '🔗', label: "Book on Restaurant's Website" },
+};
+
+const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 export default function RestaurantDetailScreen({ restaurant, currentUser, onClose }) {
   const [comment, setComment] = useState('');
-  const [foodPhoto, setFoodPhoto] = useState('');
-  const [menuPhoto, setMenuPhoto] = useState('');
+  const [rating, setRating] = useState(5);
+  const [photos, setPhotos] = useState([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
   const [reviewableVisits, setReviewableVisits] = useState([]);
   const [selectedVisitId, setSelectedVisitId] = useState(null);
   const [editingReviewId, setEditingReviewId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [savingFavorite, setSavingFavorite] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [toastMessage, setToastMessage] = useState({ text: '', type: 'info' });
+
+  // The Explore list's restaurant objects don't carry star_history/hours
+  // (kept out of the list payload on purpose — only fetched here on the
+  // detail screen where they're actually shown).
+  const [starHistory, setStarHistory] = useState(restaurant.star_history || []);
+  const [hours, setHours] = useState(restaurant.hours || []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.restaurant(restaurant.id)
+      .then((full) => {
+        if (cancelled) return;
+        setStarHistory(full.star_history || []);
+        setHours(full.hours || []);
+      })
+      .catch((err) => console.warn('Failed to load restaurant details', err.message));
+    return () => { cancelled = true; };
+  }, [restaurant.id]);
+
+  const refreshSavedState = useCallback(async () => {
+    if (!currentUser || !restaurant?.id) return;
+    try {
+      const wishlist = await api.wishlist();
+      const saved = (wishlist.wishlist || []).some((item) => String(item.restaurant_id) === String(restaurant.id) || item.restaurant_name === restaurant.name);
+      setIsSaved(saved);
+    } catch (err) {
+      console.warn('Failed to refresh saved restaurant state', err.message);
+    }
+  }, [currentUser, restaurant]);
 
   const loadReviews = useCallback(async () => {
     setLoadingReviews(true);
@@ -37,25 +83,53 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   useEffect(() => {
     loadReviews();
-  }, [loadReviews]);
+    refreshSavedState();
+  }, [loadReviews, refreshSavedState]);
 
   const resetComposer = () => {
     setComment('');
-    setFoodPhoto('');
-    setMenuPhoto('');
+    setRating(5);
+    setPhotos([]);
     setEditingReviewId(null);
   };
 
   const startEditing = (review) => {
     setEditingReviewId(review.id);
     setComment(review.comment);
-    setFoodPhoto(review.food_photo_label || '');
-    setMenuPhoto(review.menu_label || '');
+    setRating(review.rating || 5);
+    setPhotos((review.photos || []).map((p) => ({ url: p.url, label: p.label || '' })));
+  };
+
+  const pickReviewPhotos = async () => {
+    try {
+      const uris = await pickImages({ selectionLimit: 6 });
+      if (!uris.length) return;
+      setUploadingPhotos(true);
+      const uploaded = await uploadImages(uris, 'reviews', currentUser?.id || 'guest');
+      const newPhotos = uploaded.map(({ remoteUrl }, i) => ({ url: remoteUrl || uris[i], label: '' }));
+      setPhotos((prev) => [...prev, ...newPhotos]);
+    } catch (err) {
+      Alert.alert('Could not add photos', err.message);
+    } finally {
+      setUploadingPhotos(false);
+    }
+  };
+
+  const removePhoto = (index) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updatePhotoLabel = (index, label) => {
+    setPhotos((prev) => prev.map((p, i) => (i === index ? { ...p, label } : p)));
   };
 
   const submitReviewPayload = async () => {
     if (!comment.trim()) {
       Alert.alert('Review Error', 'Please write a brief comment regarding your dining experience.');
+      return;
+    }
+    if (!rating) {
+      Alert.alert('Review Error', 'Tap a star rating for this visit.');
       return;
     }
     if (!editingReviewId && !selectedVisitId) {
@@ -66,10 +140,9 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
     setSubmitting(true);
     try {
       const payload = {
-        rating: 5,
+        rating,
         comment,
-        food_photo_label: foodPhoto.trim(),
-        menu_label: menuPhoto.trim(),
+        photos: photos.map((p) => ({ url: p.url, label: p.label || '' })),
       };
       if (editingReviewId) {
         await api.updateReview(editingReviewId, payload);
@@ -114,6 +187,70 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
     ]);
   };
 
+  const submitReport = async (review, reason) => {
+    try {
+      await api.reportReview(review.id, {
+        reason,
+        details: 'Reported from the mobile review detail screen.',
+      });
+      Alert.alert('Review reported', 'Thanks — our moderation team will review this report.');
+    } catch (err) {
+      Alert.alert('Could not report review', err.message);
+    }
+  };
+
+  const handleReportReview = (review) => {
+    const reportReasons = [
+      { text: 'Spam', onPress: () => submitReport(review, 'spam') },
+      { text: 'Abusive', onPress: () => submitReport(review, 'abusive') },
+      { text: 'Offensive', onPress: () => submitReport(review, 'offensive') },
+      { text: 'False info', onPress: () => submitReport(review, 'false_info') },
+      { text: 'Other', onPress: () => submitReport(review, 'other') },
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    Alert.alert('Report review', 'Why are you reporting this review?', reportReasons);
+  };
+
+  const toggleFavorite = async () => {
+    if (!currentUser) {
+      Alert.alert('Log in required', 'Please sign in before saving a restaurant.');
+      return;
+    }
+    setSavingFavorite(true);
+    try {
+      const wishlistData = await api.wishlist();
+      const existing = (wishlistData.wishlist || []).find((item) => String(item.restaurant_id) === String(restaurant.id) || item.restaurant_name === restaurant.name);
+      if (existing) {
+        await api.removeWishlist(existing.id);
+        setIsSaved(false);
+      } else {
+        await api.addWishlist({
+          restaurant_id: restaurant.id,
+          restaurant_name: restaurant.name,
+          photo_url: restaurant.photo_url || '',
+          price_tier: restaurant.price_tier || 0,
+          opening_hours: summarizeTodayHours({ hours }),
+          note: 'Saved from StarTrack',
+        });
+        setIsSaved(true);
+      }
+    } catch (err) {
+      Alert.alert('Could not update saved restaurant', err.message);
+    } finally {
+      setSavingFavorite(false);
+    }
+  };
+
+  // StarTrack doesn't run its own booking system — this just opens whatever
+  // real platform (OpenTable, Resy, the restaurant's own site) the admin
+  // has on file for this restaurant.
+  const openReservationLink = () => {
+    if (!restaurant.reservation_url) return;
+    Linking.openURL(restaurant.reservation_url).catch(() => {
+      Alert.alert('Could not open link', 'This booking link looks invalid.');
+    });
+  };
+
   const canCompose = editingReviewId || reviewableVisits.length > 0;
 
   return (
@@ -124,20 +261,95 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
           <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{restaurant.cuisine.toUpperCase()}</Text>
           <Text style={styles.title}>{restaurant.name}</Text>
         </View>
-        <Pressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
-          <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Pressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
+            <Text style={{ color: isSaved ? '#7ce8b4' : '#f8f0e9', fontWeight: '700' }}>{savingFavorite ? '...' : (isSaved ? 'Saved' : 'Save')}</Text>
+          </Pressable>
+          <Pressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
+            <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 20 }]}>
-          📍 Location: {restaurant.city}, {restaurant.country} · Released: {restaurant.year} · Tier: {'★'.repeat(restaurant.stars)}
+        {restaurant.photo_url ? (
+          <Image source={{ uri: restaurant.photo_url }} style={{ width: '100%', height: 170, borderRadius: 12, marginBottom: 12 }} resizeMode="cover" />
+        ) : null}
+        <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 8 }]}>
+          📍 {restaurant.city}, {restaurant.country} · Released: {restaurant.year || restaurant.year_awarded || '—'} · Tier: {'★'.repeat(restaurant.stars)}
         </Text>
+        {restaurant.review_count > 0 ? (
+          <Text style={[styles.restaurantMeta, { fontSize: 13, marginBottom: 12, color: '#d2a14c' }]}>
+            ⭐ {restaurant.average_rating?.toFixed(1)} average from {restaurant.review_count} review{restaurant.review_count === 1 ? '' : 's'}
+          </Text>
+        ) : null}
+        <View style={[styles.badge, { backgroundColor: '#1a1e23', marginBottom: 16, alignSelf: 'flex-start' }]}>
+          <Text style={{ color: '#f8f0e9', fontSize: 12, fontWeight: '700' }}>{restaurant.price_tier ? '💰'.repeat(restaurant.price_tier) : 'Price unavailable'}</Text>
+        </View>
+
+        <View style={[styles.splitterCard, { padding: 16, marginBottom: 16 }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text style={[styles.sectionHeading, { marginBottom: 0 }]}>Opening Hours</Text>
+            <Text style={{ color: isRestaurantOpen(restaurant) ? '#7ce8b4' : '#e8b23d', fontSize: 11, fontWeight: '800' }}>
+              {isRestaurantOpen(restaurant) ? '● Open now' : '● Closed'}
+            </Text>
+          </View>
+          <Text style={{ color: '#6e6b64', fontSize: 11, marginBottom: 12 }}>
+            Hours provided by the restaurant
+          </Text>
+          {WEEK_DAYS.map((day, index) => {
+            const dayOfWeek = (index + 1) % 7;
+            const isToday = new Date().getDay() === dayOfWeek;
+            const entry = hours.find((h) => h.day_of_week === dayOfWeek);
+            return (
+              <View key={day} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: '#22252c' }}>
+                <Text style={{ color: isToday ? '#d2a14c' : '#c4b9a8', fontSize: 12, fontWeight: isToday ? '800' : '500' }}>{day}{isToday ? ' · Today' : ''}</Text>
+                <Text style={{ color: isToday ? '#f8f1e6' : '#8e8982', fontSize: 12 }}>{entry ? formatHoursEntry(entry) : 'Hours unavailable'}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {starHistory.length > 0 ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={styles.inputLabel}>Star History</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+              {[...starHistory].reverse().map((h) => (
+                <View key={h.year} style={[styles.badge, { backgroundColor: '#16171d' }]}>
+                  <Text style={{ color: '#aea9a1', fontSize: 11 }}>{h.year}: {'★'.repeat(h.stars)}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {restaurant.next_reservation_release && (
+          <View style={[styles.badge, { backgroundColor: '#201d18', marginBottom: 12, alignSelf: 'flex-start' }]}>
+            <Text style={{ color: '#f6d8a1', fontSize: 12, fontWeight: '700' }}>
+              📅 Next reservation window opens {new Date(restaurant.next_reservation_release).toLocaleDateString()} — save to Favorites to get reminded
+            </Text>
+          </View>
+        )}
+
+        {restaurant.reservation_url ? (
+          <Pressable style={[styles.copyShareButton, { marginBottom: 20 }]} onPress={openReservationLink}>
+            <Text style={styles.copyShareButtonText}>
+              {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).icon}{' '}
+              {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).label}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {/* Existing Guest Review Feeds — visible to everyone */}
         <Text style={styles.sectionHeading}>Gourmet Appraisals ({reviews.length})</Text>
         {loadingReviews ? (
-          <ActivityIndicator color="#d2a14c" style={{ marginVertical: 12 }} />
+          <View style={{ gap: 12 }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <ReviewCardSkeleton key={i} />
+            ))}
+          </View>
+        ) : reviews.length === 0 ? (
+          <EmptyState icon="💬" title="No Reviews Yet" description="Complete a verified visit to unlock your review slot and be the first to share your dining experience." onAction={loadReviews} actionLabel="Check Review Eligibility" />
         ) : (
           reviews.map((r) => {
             const isOwn = currentUser && r.user_id === currentUser.id;
@@ -147,23 +359,41 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
                   <Text style={{ color: '#d2a14c', fontWeight: '700' }}>{r.author}</Text>
                   <Text style={{ color: '#6b6b70', fontSize: 11 }}>{formatDate(r.created_at)}</Text>
                 </View>
+                <Text style={{ color: '#d2a14c', fontSize: 13, marginBottom: 6 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</Text>
                 <Text style={{ color: '#f8f0e9', fontSize: 13, lineHeight: 18, marginBottom: 8 }}>{r.comment}</Text>
 
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: isOwn ? 10 : 0 }}>
-                  {r.food_photo_label ? <View style={[styles.badge, { backgroundColor: '#16171d' }]}><Text style={{ color: '#aea9a1', fontSize: 11 }}>📸 {r.food_photo_label}</Text></View> : null}
-                  {r.menu_label ? <View style={[styles.badge, { backgroundColor: '#16171d' }]}><Text style={{ color: '#aea9a1', fontSize: 11 }}>🥂 {r.menu_label}</Text></View> : null}
-                </View>
+                {r.photos && r.photos.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {r.photos.map((p) => (
+                        <View key={p.id} style={{ width: 72 }}>
+                          <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 10 }} resizeMode="cover" />
+                          {p.label ? (
+                            <Text style={{ color: '#aea9a1', fontSize: 10, marginTop: 2 }} numberOfLines={1}>{p.label}</Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                ) : null}
 
-                {isOwn && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                   <View style={{ flexDirection: 'row', gap: 16 }}>
-                    <Pressable onPress={() => startEditing(r)}>
-                      <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700' }}>Edit</Text>
-                    </Pressable>
-                    <Pressable onPress={() => confirmDelete(r)}>
-                      <Text style={{ color: '#ff6b6b', fontSize: 12, fontWeight: '700' }}>Delete</Text>
-                    </Pressable>
+                    {isOwn && (
+                      <>
+                        <Pressable onPress={() => startEditing(r)}>
+                          <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700' }}>Edit</Text>
+                        </Pressable>
+                        <Pressable onPress={() => confirmDelete(r)}>
+                          <Text style={{ color: '#ff6b6b', fontSize: 12, fontWeight: '700' }}>Delete</Text>
+                        </Pressable>
+                      </>
+                    )}
                   </View>
-                )}
+                  <Pressable onPress={() => handleReportReview(r)}>
+                    <Text style={{ color: '#8e8982', fontSize: 12, fontWeight: '700' }}>Report</Text>
+                  </Pressable>
+                </View>
               </View>
             );
           })
@@ -204,11 +434,44 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
               onChangeText={setComment}
             />
 
-            <Text style={styles.inputLabel}>Food Asset Name (Photo Mock)</Text>
-            <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="e.g. Seared Wagyu A5" placeholderTextColor="#555" value={foodPhoto} onChangeText={setFoodPhoto} />
+            <Text style={styles.inputLabel}>Rating For This Visit</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 16 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Pressable key={star} onPress={() => setRating(star)} hitSlop={6}>
+                  <Text style={{ fontSize: 28, color: star <= rating ? '#d2a14c' : '#3a3a3f' }}>★</Text>
+                </Pressable>
+              ))}
+            </View>
 
-            <Text style={styles.inputLabel}>Menu Title Reference (Menu Mock)</Text>
-            <TextInput style={[styles.input, { marginBottom: 16 }]} placeholder="e.g. Summer Degustation Menu" placeholderTextColor="#555" value={menuPhoto} onChangeText={setMenuPhoto} />
+            <Text style={styles.inputLabel}>Photos ({photos.length})</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+                {photos.map((p, i) => (
+                  <View key={`${p.url}-${i}`} style={{ width: 84 }}>
+                    <View style={{ position: 'relative' }}>
+                      <Image source={{ uri: p.url }} style={{ width: 84, height: 64, borderRadius: 10 }} resizeMode="cover" />
+                      <Pressable
+                        onPress={() => removePhoto(i)}
+                        style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#09090d', borderRadius: 10, width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Text style={{ color: '#ff6b6b', fontSize: 12, fontWeight: '700' }}>✕</Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={[styles.input, { fontSize: 11, height: 28, paddingVertical: 4, paddingHorizontal: 6, marginTop: 4 }]}
+                      placeholder="Caption"
+                      placeholderTextColor="#555"
+                      value={p.label}
+                      onChangeText={(text) => updatePhotoLabel(i, text)}
+                    />
+                  </View>
+                ))}
+                <Pressable style={[styles.badge, { backgroundColor: '#1e1f26', height: 64, justifyContent: 'center' }]} onPress={pickReviewPhotos} disabled={uploadingPhotos}>
+                  {uploadingPhotos ? <ActivityIndicator color="#d2a14c" /> : <Text style={{ color: '#f8f0e9', fontWeight: '700', fontSize: 12 }}>📷 Add Photos</Text>}
+                </Pressable>
+              </View>
+            </ScrollView>
+            <Text style={{ color: '#6b6b70', fontSize: 11, marginBottom: 16 }}>Add as many photos as you like in one go, with an optional caption for each.</Text>
 
             <Pressable style={styles.copyShareButton} onPress={submitReviewPayload} disabled={submitting}>
               {submitting ? (

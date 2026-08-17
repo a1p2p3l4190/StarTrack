@@ -25,23 +25,23 @@ func verifyCheckinHandler(c *gin.Context) {
 
 	var payload verifyCheckinRequest
 	if err := c.BindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
 	}
 
 	var device NFCDevice
 	if err := db.Where("tag_id = ?", payload.TagID).First(&device).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"verified": false, "message": "unknown NFC tag"})
+		RespondError(c, http.StatusBadRequest, ErrCodeBadRequest, "Unknown NFC tag", nil)
 		return
 	}
 	if device.Status == "disabled" {
-		c.JSON(http.StatusBadRequest, gin.H{"verified": false, "message": "this device has been disabled"})
+		RespondError(c, http.StatusBadRequest, ErrCodeBadRequest, "This device has been disabled", nil)
 		return
 	}
 
 	var restaurant Restaurant
 	if err := db.First(&restaurant, device.RestaurantID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"verified": false, "message": "restaurant not found"})
+		RespondNotFound(c, "Restaurant not found")
 		return
 	}
 
@@ -49,7 +49,7 @@ func verifyCheckinHandler(c *gin.Context) {
 	// the client, which invites an immediate retry. Reject that retry instead
 	// of double-awarding score/badges for what was really one visit.
 	if hasRecentVerifiedCheckin(userID, restaurant.ID) {
-		c.JSON(http.StatusConflict, gin.H{"verified": false, "message": "recent verified checkin exists"})
+		RespondError(c, http.StatusConflict, ErrCodeConflict, "Recent verified checkin exists", nil)
 		return
 	}
 
@@ -84,7 +84,7 @@ func verifyCheckinHandler(c *gin.Context) {
 		record.VerifiedAt = &now
 	}
 	if err := db.Create(&record).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to create checkin record")
 		return
 	}
 
@@ -100,11 +100,11 @@ func verifyCheckinHandler(c *gin.Context) {
 	detectAnomalies(userID, restaurant.ID, device.ID, record.ID, signatureValid, withinGeofence)
 
 	if !signatureValid {
-		c.JSON(http.StatusUnauthorized, gin.H{"verified": false, "message": message})
+		RespondUnauthorized(c, "Signature validation failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{
 		"verified":   verified,
 		"message":    message,
 		"restaurant": restaurant.Name,
@@ -119,13 +119,20 @@ func verifyCheckinHandler(c *gin.Context) {
 func historyHandler(c *gin.Context) {
 	userID := currentUserID(c)
 	history := buildCheckinHistory(userID)
-	c.JSON(http.StatusOK, gin.H{"history": history})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"history": history})
 }
 
 // passportHandler returns { "1": "AT", "2": "CB", ... } — up to 28 stamped
 // slots in chronological order, matching the Passport grid's `verifiedDays`.
 func passportHandler(c *gin.Context) {
-	userID := currentUserID(c)
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{
+		"verified_days": verifiedDaysForUser(currentUserID(c)),
+	})
+}
+
+// verifiedDaysForUser is shared by passportHandler (self) and the friend
+// badge-wall endpoint (userBadgeWallHandler).
+func verifiedDaysForUser(userID uint) gin.H {
 	history := buildCheckinHistory(userID)
 
 	type entry struct {
@@ -152,7 +159,7 @@ func passportHandler(c *gin.Context) {
 	for i, e := range entries {
 		verifiedDays[fmt.Sprintf("%d", i+1)] = e.shorthand
 	}
-	c.JSON(http.StatusOK, gin.H{"verified_days": verifiedDays})
+	return verifiedDays
 }
 
 type checkinHistoryEntry struct {

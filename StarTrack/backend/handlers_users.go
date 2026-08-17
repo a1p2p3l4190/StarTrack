@@ -19,7 +19,7 @@ func listUsersHandler(c *gin.Context) {
 		query = query.Where("LOWER(email) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?)", like, like)
 	}
 	query.Find(&users)
-	c.JSON(http.StatusOK, gin.H{"users": users})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"users": users})
 }
 
 // getUserHistoryHandler is the admin equivalent of the mobile app's
@@ -28,36 +28,36 @@ func listUsersHandler(c *gin.Context) {
 func getUserHistoryHandler(c *gin.Context) {
 	var user User
 	if err := db.First(&user, c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		RespondNotFound(c, "User not found")
 		return
 	}
 	var checkins []CheckIn
 	db.Preload("Restaurant").Where("user_id = ?", user.ID).Order("created_at desc").Find(&checkins)
-	c.JSON(http.StatusOK, gin.H{"user": user, "checkins": checkins})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"user": user, "checkins": checkins})
 }
 
 func banUserHandler(c *gin.Context) {
 	var user User
 	if err := db.First(&user, c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		RespondNotFound(c, "User not found")
 		return
 	}
 	user.Banned = true
 	db.Save(&user)
 	logAuditEvent(c, "BAN_USER", "user", &user.ID, user.Email)
-	c.JSON(http.StatusOK, user)
+	RespondSuccess(c, http.StatusOK, user)
 }
 
 func unbanUserHandler(c *gin.Context) {
 	var user User
 	if err := db.First(&user, c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		RespondNotFound(c, "User not found")
 		return
 	}
 	user.Banned = false
 	db.Save(&user)
 	logAuditEvent(c, "UNBAN_USER", "user", &user.ID, user.Email)
-	c.JSON(http.StatusOK, user)
+	RespondSuccess(c, http.StatusOK, user)
 }
 
 type manualVerifyRequest struct {
@@ -73,17 +73,17 @@ type manualVerifyRequest struct {
 func manualVerifyCheckinHandler(c *gin.Context) {
 	var req manualVerifyRequest
 	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
 	}
 	var user User
 	if err := db.First(&user, req.UserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		RespondNotFound(c, "User not found")
 		return
 	}
 	var restaurant Restaurant
 	if err := db.First(&restaurant, req.RestaurantID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "restaurant not found"})
+		RespondNotFound(c, "Restaurant not found")
 		return
 	}
 
@@ -103,7 +103,7 @@ func manualVerifyCheckinHandler(c *gin.Context) {
 		CreatedAt:    now,
 	}
 	if err := db.Create(&record).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to create manual verification checkin")
 		return
 	}
 
@@ -115,5 +115,5 @@ func manualVerifyCheckinHandler(c *gin.Context) {
 
 	logAuditEvent(c, "MANUAL_VERIFY_CHECKIN", "checkin", &record.ID, fmt.Sprintf("user=%d restaurant=%d note=%s", req.UserID, req.RestaurantID, req.Note))
 
-	c.JSON(http.StatusCreated, gin.H{"checkin": record, "new_badges": newBadges})
+	RespondSuccess(c, http.StatusCreated, map[string]interface{}{"checkin": record, "new_badges": newBadges})
 }

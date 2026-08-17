@@ -15,57 +15,57 @@ import (
 func listCitiesHandler(c *gin.Context) {
 	var cities []City
 	db.Order("name asc").Find(&cities)
-	c.JSON(http.StatusOK, gin.H{"cities": cities})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"cities": cities})
 }
 
 func createCityHandler(c *gin.Context) {
 	var payload City
 	if err := c.BindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
 	}
 	payload.Name = strings.TrimSpace(payload.Name)
 	if payload.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		RespondValidationError(c, "Name is required", nil)
 		return
 	}
 	var existing City
 	if err := db.Where("LOWER(name) = LOWER(?)", payload.Name).First(&existing).Error; err == nil {
-		c.JSON(http.StatusOK, existing)
+		RespondSuccess(c, http.StatusOK, existing)
 		return
 	}
 	if err := db.Create(&payload).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to create city")
 		return
 	}
-	c.JSON(http.StatusCreated, payload)
+	RespondSuccess(c, http.StatusCreated, payload)
 }
 
 func listCuisinesHandler(c *gin.Context) {
 	var cuisines []Cuisine
 	db.Order("name asc").Find(&cuisines)
-	c.JSON(http.StatusOK, gin.H{"cuisines": cuisines})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"cuisines": cuisines})
 }
 
 func createCuisineHandler(c *gin.Context) {
 	var payload Cuisine
 	if err := c.BindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondValidationError(c, "Invalid request format", map[string]string{"error": err.Error()})
 		return
 	}
 	payload.Name = strings.TrimSpace(payload.Name)
 	if payload.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		RespondValidationError(c, "Name is required", nil)
 		return
 	}
 	var existing Cuisine
 	if err := db.Where("LOWER(name) = LOWER(?)", payload.Name).First(&existing).Error; err == nil {
-		c.JSON(http.StatusOK, existing)
+		RespondSuccess(c, http.StatusOK, existing)
 		return
 	}
 	if err := db.Create(&payload).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondInternalError(c, "Failed to create cuisine")
 		return
 	}
-	c.JSON(http.StatusCreated, payload)
+	RespondSuccess(c, http.StatusCreated, payload)
 }

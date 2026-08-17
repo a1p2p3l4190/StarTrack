@@ -47,6 +47,26 @@ export function RestaurantCardSkeleton() {
   );
 }
 
+export function ReviewCardSkeleton() {
+  return (
+    <View style={{ backgroundColor: '#121317', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#1d1e24', marginBottom: 12 }}>
+      <ShimmerBlock width="40%" height={14} marginBottom={6} />
+      <ShimmerBlock width="100%" height={12} marginBottom={4} />
+      <ShimmerBlock width="85%" height={12} marginBottom={10} />
+      <ShimmerBlock width={80} height={10} />
+    </View>
+  );
+}
+
+export function DashboardChartSkeleton() {
+  return (
+    <View style={{ backgroundColor: '#121317', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#1d1e24', minHeight: 200 }}>
+      <ShimmerBlock width="50%" height={16} marginBottom={12} />
+      <ShimmerBlock width="100%" height={120} borderRadius={8} />
+    </View>
+  );
+}
+
 export default function RestaurantListSkeleton({ count = 5 }) {
   return (
     <View>

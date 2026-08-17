@@ -1,15 +1,17 @@
 // screens/ToolsScreen.jsx
 import React, { useEffect, useState } from 'react';
-import { Text, TextInput, View, Pressable, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard, Alert } from 'react-native';
+import { Text, TextInput, View, Pressable, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard, Alert, Image } from 'react-native';
 import { styles } from '../styles';
 import { api } from '../api';
+import { scheduleReservationReleaseReminder } from '../reminderScheduler';
+import StarMap from '../components/StarMap';
 
 export default function ToolsScreen({
-  total, setTotal, tax, setTax, tip, setTip, people, setPeople, billDetails, onSharePress
+  total, setTotal, tax, setTax, tip, setTip, people, setPeople, billDetails, onSharePress, restaurants = [], onOpenPassport, onExplore, onOpenDetail, checkinHistory = {}, currentUser
 }) {
   const [wishlist, setWishlist] = useState([]);
-  const [newName, setNewName] = useState('');
-  const [newNote, setNewNote] = useState('');
+  const [activeSection, setActiveSection] = useState('bill');
+  const [reminders, setReminders] = useState({});
 
   useEffect(() => {
     api.wishlist()
@@ -17,15 +19,24 @@ export default function ToolsScreen({
       .catch((err) => console.warn('Failed to load wishlist', err.message));
   }, []);
 
-  const addWishlistItem = async () => {
-    if (!newName.trim()) return;
-    try {
-      const item = await api.addWishlist({ restaurant_name: newName.trim(), note: newNote.trim() });
-      setWishlist((prev) => [item, ...prev]);
-      setNewName('');
-      setNewNote('');
-    } catch (err) {
-      Alert.alert('Could not add to wishlist', err.message);
+  const restaurantById = (id) => restaurants.find((r) => r.id === id);
+  const adjustPeople = (amount) => {
+    const current = Math.max(1, parseInt(people, 10) || 1);
+    setPeople(String(Math.max(1, current + amount)));
+  };
+
+  // The release date is never stored on the wishlist item — it's read live
+  // off `restaurants` (fetched fresh each app open) so it's always the true
+  // next occurrence, even after this month's date has already rolled over.
+  const remindWishlistItem = async (item) => {
+    const restaurant = restaurantById(item.restaurant_id);
+    if (!restaurant?.next_reservation_release) return;
+    const id = await scheduleReservationReleaseReminder(restaurant.name, restaurant.next_reservation_release);
+    if (id) {
+      setReminders((prev) => ({ ...prev, [item.id]: true }));
+      Alert.alert('Reminder set', `We'll notify you the day before reservations open at ${restaurant.name}.`);
+    } else {
+      Alert.alert('Could not set reminder', 'That release date is less than 24 hours away, or reminders aren’t supported on this platform.');
     }
   };
 
@@ -47,11 +58,20 @@ export default function ToolsScreen({
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View>
-            <View style={styles.section}>
-              <Text style={styles.sectionHeading}>Convivial Split Utility</Text>
+            <View style={{ flexDirection: 'row', backgroundColor: '#101115', borderRadius: 16, borderWidth: 1, borderColor: '#292c34', padding: 4, marginBottom: 18 }}>
+              {[['bill', 'Bill Splitter'], ['saved', 'Saved'], ['reminders', 'Reminders'], ['map', 'Star Map']].map(([key, label]) => (
+                <Pressable key={key} onPress={() => setActiveSection(key)} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: activeSection === key ? '#1e1f26' : 'transparent', alignItems: 'center' }}>
+                  <Text style={{ color: activeSection === key ? '#f6f0e7' : '#8d8c91', fontSize: 11, fontWeight: '700' }}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {activeSection === 'bill' && <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Bill Splitter</Text>
+              <Text style={{ color: '#8e8982', fontSize: 12, lineHeight: 18, marginBottom: 14 }}>Split the bill, calculate gratuity, and share each person’s total.</Text>
               <View style={styles.splitterCard}>
 
-                <View style={styles.inputGrid}>
+                  <View style={styles.inputGrid}>
                   <View style={styles.inputWrapper}>
                     <Text style={styles.inputLabel}>Subtotal ($)</Text>
                     <TextInput
@@ -65,14 +85,11 @@ export default function ToolsScreen({
                   </View>
                   <View style={styles.inputWrapper}>
                     <Text style={styles.inputLabel}>People</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={people}
-                      onChangeText={setPeople}
-                      keyboardType="number-pad"
-                      placeholderTextColor="#555"
-                      returnKeyType="done"
-                    />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                      <Pressable onPress={() => adjustPeople(-1)} style={[styles.badge, { marginRight: 0, paddingHorizontal: 9, paddingVertical: 12 }]}><Text style={{ color: '#d2a14c', fontSize: 16, fontWeight: '800' }}>−</Text></Pressable>
+                      <TextInput style={[styles.input, { flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: 2 }]} value={people} onChangeText={setPeople} keyboardType="number-pad" placeholderTextColor="#555" returnKeyType="done" />
+                      <Pressable onPress={() => adjustPeople(1)} style={[styles.badge, { marginRight: 0, paddingHorizontal: 9, paddingVertical: 12 }]}><Text style={{ color: '#d2a14c', fontSize: 16, fontWeight: '800' }}>+</Text></Pressable>
+                    </View>
                   </View>
                 </View>
 
@@ -101,8 +118,18 @@ export default function ToolsScreen({
                   </View>
                 </View>
 
+                <Text style={[styles.inputLabel, { marginTop: 2 }]}>Quick Tip</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                  {[15, 18, 20].map((value) => (
+                    <Pressable key={value} onPress={() => setTip(String(value))} style={[styles.badge, String(tip) === String(value) && styles.badgeActive]}>
+                      <Text style={[styles.badgeLabel, String(tip) === String(value) && styles.badgeLabelActive]}>{value}%</Text>
+                    </Pressable>
+                  ))}
+                  <TextInput style={[styles.input, { width: 82, height: 36, paddingHorizontal: 8 }]} value={tip} onChangeText={setTip} keyboardType="numeric" placeholder="Custom" placeholderTextColor="#555" />
+                </View>
+
                 <View style={styles.receiptVisualCard}>
-                  <Text style={styles.receiptHeader}>AURUM INSPIRED RECEIPT</Text>
+                  <Text style={styles.receiptHeader}>BILL SUMMARY</Text>
                   <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Subtotal</Text><Text style={styles.receiptValue}>${billDetails.subtotal}</Text></View>
                   <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Tax & Gratuity</Text><Text style={styles.receiptValue}>+${(parseFloat(billDetails.taxTotal) + parseFloat(billDetails.tipTotal)).toFixed(2)}</Text></View>
                   <View style={styles.receiptDivider} />
@@ -116,46 +143,94 @@ export default function ToolsScreen({
                   </View>
 
                   <Pressable style={styles.copyShareButton} onPress={onSharePress}>
-                    <Text style={styles.copyShareButtonText}>📋 Share Elegant Breakdowns</Text>
+                    <Text style={styles.copyShareButtonText}>📋 Copy Bill Summary</Text>
                   </Pressable>
                 </View>
               </View>
-            </View>
+            </View>}
 
-            <View style={styles.rowSection}>
+            {activeSection === 'saved' && <View style={[styles.rowSection, { flexDirection: 'column' }]}>
               <View style={styles.splitCard}>
-                <Text style={styles.sectionHeading}>Reservation Alerts</Text>
-                {wishlist.map((item) => (
-                  <Pressable key={item.id} style={styles.wishItem} onLongPress={() => removeWishlistItem(item.id)}>
-                    <Text style={styles.wishName}>{item.restaurant_name}</Text>
-                    <Text style={styles.wishSub}>{item.note || 'Awaiting release details'}</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <Text style={[styles.sectionHeading, { marginBottom: 0 }]}>Saved Restaurants</Text>
+                          <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '800' }}>{wishlist.length}</Text>
+                        </View>
+                {wishlist.length === 0 ? (
+                  <View>
+                    <Text style={styles.starMapText}>No saved restaurants yet. Save a place from Explore to build your personal shortlist.</Text>
+                    {onExplore && <Pressable onPress={onExplore} style={[styles.copyShareButton, { marginTop: 14 }]}><Text style={styles.copyShareButtonText}>Find a Restaurant</Text></Pressable>}
+                  </View>
+                ) : (
+                  wishlist.map((item) => {
+                    const linkedRestaurant = item.restaurant_id ? restaurantById(item.restaurant_id) : null;
+                    const nextRelease = linkedRestaurant?.next_reservation_release;
+                    return (
+                      <View key={item.id} style={styles.wishItem}>
+                        <Pressable onPress={() => linkedRestaurant && onOpenDetail?.(linkedRestaurant)}>
+                        <View style={styles.wishCardRow}>
+                          {item.photo_url ? (
+                            <Image source={{ uri: item.photo_url }} style={styles.wishImage} resizeMode="cover" />
+                          ) : (
+                            <View style={styles.wishImagePlaceholder}><Text style={styles.wishImagePlaceholderText}>★</Text></View>
+                          )}
+                          <View style={styles.wishContent}>
+                            <Text style={styles.wishName}>{item.restaurant_name}</Text>
+                            <Text style={styles.wishSub}>
+                              📍 {linkedRestaurant?.city || 'Location unavailable'}
+                            </Text>
+                            <Text style={styles.wishSub}>
+                              🍽️ {linkedRestaurant?.cuisine || 'Category unavailable'}
+                            </Text>
+                            {nextRelease && (
+                              <View style={{ marginTop: 6 }}>
+                                <Text style={styles.wishMeta}>📅 Next opens {new Date(nextRelease).toLocaleDateString()}</Text>
+                                <Pressable onPress={() => remindWishlistItem(item)} style={{ marginTop: 4 }}>
+                                  <Text style={{ color: reminders[item.id] ? '#7ce8b4' : '#d2a14c', fontSize: 12, fontWeight: '700' }}>{reminders[item.id] ? '✓ Reminder Set' : '🔔 Remind Me'}</Text>
+                                </Pressable>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        </Pressable>
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 8 }}>
+                          {linkedRestaurant && <Pressable onPress={() => onOpenDetail?.(linkedRestaurant)}><Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700' }}>View</Text></Pressable>}
+                          <Pressable onPress={() => removeWishlistItem(item.id)}><Text style={{ color: '#ff6b6b', fontSize: 12, fontWeight: '700' }}>Remove</Text></Pressable>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+                {wishlist.length > 0 && onExplore && (
+                  <Pressable onPress={onExplore} style={[styles.copyShareButton, { marginTop: 14, paddingVertical: 8 }]}>
+                    <Text style={styles.copyShareButtonText}>+ Save More Restaurants</Text>
                   </Pressable>
-                ))}
-                <View style={{ marginTop: wishlist.length ? 12 : 0 }}>
-                  <TextInput
-                    style={[styles.input, { marginBottom: 8, height: 38 }]}
-                    placeholder="Restaurant name"
-                    placeholderTextColor="#555"
-                    value={newName}
-                    onChangeText={setNewName}
-                  />
-                  <TextInput
-                    style={[styles.input, { marginBottom: 8, height: 38 }]}
-                    placeholder="Note (e.g. Next release: 1 May)"
-                    placeholderTextColor="#555"
-                    value={newNote}
-                    onChangeText={setNewNote}
-                  />
-                  <Pressable style={[styles.copyShareButton, { marginTop: 0, paddingVertical: 8 }]} onPress={addWishlistItem}>
-                    <Text style={styles.copyShareButtonText}>+ Add to Wishlist</Text>
-                  </Pressable>
-                </View>
+                )}
               </View>
-              <View style={styles.splitCard}>
-                <Text style={styles.sectionHeading}>Star Map</Text>
-                <Text style={styles.starMapText}>Share your badge wall with friends and control privacy settings.</Text>
+            </View>}
+
+            {activeSection === 'reminders' && (
+              <View style={styles.section}>
+                <Text style={styles.sectionHeading}>Reservation Reminders</Text>
+                <Text style={{ color: '#8e8982', fontSize: 12, lineHeight: 18, marginBottom: 14 }}>Keep track of when your saved restaurants open their next reservation window.</Text>
+                {wishlist.filter((item) => restaurantById(item.restaurant_id)?.next_reservation_release).length === 0 ? (
+                  <View style={styles.splitterCard}>
+                    <Text style={styles.starMapText}>No upcoming reservation windows yet.</Text>
+                    {onExplore && <Pressable onPress={onExplore} style={[styles.copyShareButton, { marginTop: 14 }]}><Text style={styles.copyShareButtonText}>Explore Restaurants</Text></Pressable>}
+                  </View>
+                ) : wishlist.filter((item) => restaurantById(item.restaurant_id)?.next_reservation_release).map((item) => {
+                  const restaurant = restaurantById(item.restaurant_id);
+                  return <View key={item.id} style={[styles.splitterCard, { marginBottom: 10, padding: 16 }]}>
+                    <Text style={styles.wishName}>{restaurant.name}</Text>
+                    <Text style={styles.wishSub}>Reservations open {new Date(restaurant.next_reservation_release).toLocaleDateString()}</Text>
+                    <Pressable onPress={() => remindWishlistItem(item)} style={[styles.copyShareButton, { marginTop: 12 }]}><Text style={styles.copyShareButtonText}>{reminders[item.id] ? '✓ Reminder Set' : 'Set Reminder'}</Text></Pressable>
+                  </View>;
+                })}
               </View>
-            </View>
+            )}
+
+            {activeSection === 'map' && (
+              <StarMap restaurants={restaurants} checkinHistory={checkinHistory} currentUser={currentUser} onOpenDetail={onOpenDetail} />
+            )}
           </View>
         </TouchableWithoutFeedback>
       </ScrollView>

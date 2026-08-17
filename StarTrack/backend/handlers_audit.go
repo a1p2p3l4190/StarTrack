@@ -42,5 +42,5 @@ func logAuditEvent(c *gin.Context, action, targetType string, targetID *uint, de
 func listAuditLogsHandler(c *gin.Context) {
 	var logs []AdminAuditLog
 	db.Order("created_at desc").Limit(200).Find(&logs)
-	c.JSON(http.StatusOK, gin.H{"audit_logs": logs})
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"audit_logs": logs})
 }

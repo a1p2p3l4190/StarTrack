@@ -95,6 +95,107 @@ func TestAnomalies_RequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestSocial_FollowToggleAndCounts(t *testing.T) {
+	router, _ := newTestApp(t)
+	userAToken, userAID := registerUser(t, router, "a@example.com", "hunter22", "User A")
+	_, userBID := registerUser(t, router, "b@example.com", "hunter22", "User B")
+
+	follow := doRequest(t, router, http.MethodPost, fmt.Sprintf("/api/social/users/%d/follow", userBID), userAToken, nil)
+	if follow.Code != http.StatusOK {
+		t.Fatalf("expected 200 when following another user, got %d: %s", follow.Code, follow.Body.String())
+	}
+
+	var followResp struct {
+		Following      bool `json:"following"`
+		FollowerCount  int  `json:"follower_count"`
+		FollowingCount int  `json:"following_count"`
+	}
+	decodeJSON(t, follow, &followResp)
+	if !followResp.Following || followResp.FollowerCount != 1 || followResp.FollowingCount != 1 {
+		t.Fatalf("expected follow state to reflect one follower and one following, got %+v", followResp)
+	}
+
+	stats := doRequest(t, router, http.MethodGet, fmt.Sprintf("/api/social/users/%d/stats", userBID), userAToken, nil)
+	if stats.Code != http.StatusOK {
+		t.Fatalf("expected 200 for follow stats, got %d: %s", stats.Code, stats.Body.String())
+	}
+	var userBStats struct {
+		FollowerCount  int `json:"follower_count"`
+		FollowingCount int `json:"following_count"`
+	}
+	decodeJSON(t, stats, &userBStats)
+	if userBStats.FollowerCount != 1 || userBStats.FollowingCount != 0 {
+		t.Fatalf("expected User B to have one follower and zero following, got %+v", userBStats)
+	}
+
+	me := doRequest(t, router, http.MethodGet, "/api/auth/me", userAToken, nil)
+	if me.Code != http.StatusOK {
+		t.Fatalf("expected 200 for me, got %d: %s", me.Code, me.Body.String())
+	}
+	var meUser struct {
+		ID             uint `json:"id"`
+		FollowersCount int  `json:"followers_count"`
+		FollowingCount int  `json:"following_count"`
+	}
+	decodeJSON(t, me, &meUser)
+	if meUser.ID != userAID || meUser.FollowingCount != 1 {
+		t.Fatalf("expected current user me payload to include follow counts, got %+v", meUser)
+	}
+
+	unfollow := doRequest(t, router, http.MethodPost, fmt.Sprintf("/api/social/users/%d/follow", userBID), userAToken, nil)
+	if unfollow.Code != http.StatusOK {
+		t.Fatalf("expected 200 when toggling follow off, got %d: %s", unfollow.Code, unfollow.Body.String())
+	}
+	var unfollowResp struct {
+		Following bool `json:"following"`
+	}
+	decodeJSON(t, unfollow, &unfollowResp)
+	if unfollowResp.Following {
+		t.Fatalf("expected follow to be toggled off, got %+v", unfollowResp)
+	}
+}
+
+func TestBadgeWall_RequiresFollowUnlessSelf(t *testing.T) {
+	router, _ := newTestApp(t)
+	userAToken, _ := registerUser(t, router, "a@example.com", "hunter22", "User A")
+	userBToken, userBID := registerUser(t, router, "b@example.com", "hunter22", "User B")
+
+	// Not following yet — locked out.
+	w := doRequest(t, router, http.MethodGet, fmt.Sprintf("/api/social/users/%d/badge-wall", userBID), userAToken, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 viewing a non-followed user's badge wall, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Viewing your own wall never requires following yourself.
+	w = doRequest(t, router, http.MethodGet, fmt.Sprintf("/api/social/users/%d/badge-wall", userBID), userBToken, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 viewing your own badge wall, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Follow, then it opens up.
+	doRequest(t, router, http.MethodPost, fmt.Sprintf("/api/social/users/%d/follow", userBID), userAToken, nil)
+	w = doRequest(t, router, http.MethodGet, fmt.Sprintf("/api/social/users/%d/badge-wall", userBID), userAToken, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 viewing a followed user's badge wall, got %d: %s", w.Code, w.Body.String())
+	}
+	var wall struct {
+		DisplayName string `json:"display_name"`
+		Badges      []struct {
+			Unlocked bool `json:"unlocked"`
+		} `json:"badges"`
+		Footprint struct {
+			VerifiedCheckins int64 `json:"verified_checkins"`
+		} `json:"footprint"`
+	}
+	decodeJSON(t, w, &wall)
+	if wall.DisplayName != "User B" {
+		t.Errorf("expected badge wall for User B, got %+v", wall)
+	}
+	if wall.Footprint.VerifiedCheckins != 0 {
+		t.Errorf("expected zero verified checkins for a fresh user, got %+v", wall.Footprint)
+	}
+}
+
 func TestVerifyCheckin_VelocityAnomalyFlagged(t *testing.T) {
 	router, _ := newTestApp(t)
 	chicago := seedRestaurant(t, Restaurant{Name: "Aurum Table", Stars: 3, City: "Chicago", LocationLat: 41.8984, LocationLong: -87.6242})

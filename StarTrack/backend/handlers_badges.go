@@ -8,8 +8,13 @@ import (
 )
 
 func listBadgesHandler(c *gin.Context) {
-	userID := currentUserID(c)
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{"badges": badgesForUser(currentUserID(c))})
+}
 
+// badgesForUser is shared by the "my badges" endpoint and the friend
+// badge-wall endpoint (userBadgeWallHandler) — same catalog, evaluated
+// against whichever user ID is passed in.
+func badgesForUser(userID uint) []gin.H {
 	var badges []Badge
 	db.Order("id asc").Find(&badges)
 
@@ -43,7 +48,7 @@ func listBadgesHandler(c *gin.Context) {
 			"user_rank":      userRank,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"badges": out})
+	return out
 }
 
 // badgeRules maps a badge code to a predicate evaluated against the
@@ -139,6 +144,14 @@ func evaluateBadgesForUser(userID uint) []Badge {
 		record := UserBadge{UserID: userID, BadgeID: b.ID, UnlockedAt: time.Now()}
 		if err := db.Create(&record).Error; err == nil {
 			newlyUnlocked = append(newlyUnlocked, b)
+
+			// Create notification for badge unlock
+			db.Create(&Notification{
+				UserID:  userID,
+				Kind:    "badge",
+				Title:   "Badge unlocked: " + b.Title,
+				Message: b.Description,
+			})
 		}
 	}
 	return newlyUnlocked

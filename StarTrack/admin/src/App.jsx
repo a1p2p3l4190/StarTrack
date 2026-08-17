@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './styles.css'
 import { api, getToken, setToken } from './api'
 import { CheckinTrendChart, CityBreakdownChart } from './DashboardCharts'
@@ -244,10 +244,31 @@ function LoginPanel({ onAuthenticated }) {
 }
 
 const RESTAURANT_PAGE_SIZE = 10
-const EMPTY_RESTAURANT_FORM = { name: '', city: '', cuisine: '', stars: 1, year_awarded: 2026 }
+const EMPTY_RESTAURANT_FORM = { name: '', city: '', cuisine: '', stars: 1, year_awarded: 2026, reservation_release_day: 0, price_tier: 0, reservation_platform: '', reservation_url: '', photo_url: '' }
+const RESERVATION_PLATFORMS = [
+  { value: '', label: 'None' },
+  { value: 'opentable', label: 'OpenTable' },
+  { value: 'resy', label: 'Resy' },
+  { value: 'website', label: "Restaurant's website" },
+]
+
+// day_of_week matches JS's Date.getDay() (0=Sunday..6=Saturday), the same
+// convention the backend's RestaurantHours uses.
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 function clampStars(value) {
   return Math.min(3, Math.max(1, Math.round(value) || 1))
+}
+
+function clampPriceTier(value) {
+  return Math.min(3, Math.max(0, Math.round(value) || 0))
+}
+
+// Always renders a full Sun-Sat week in the editor, filling in any day
+// missing from the saved set as closed/unset.
+function fillWeekHours(hours) {
+  const byDay = new Map((hours || []).map((h) => [h.day_of_week, h]))
+  return WEEKDAY_LABELS.map((_, day) => byDay.get(day) || { day_of_week: day, is_closed: true, open_time: '', close_time: '' })
 }
 
 export default function App() {
@@ -257,6 +278,7 @@ export default function App() {
   const guard = useActionGuard()
 
   const [tab, setTab] = useState('dashboard')
+  const [globalSearch, setGlobalSearch] = useState('')
 
   // Full, unpaginated restaurant list — backs every dropdown/typeahead in
   // the app (NFC provisioning, reassignment, manual check-in).
@@ -269,6 +291,8 @@ export default function App() {
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
   const [auditLogs, setAuditLogs] = useState([])
+  const [reports, setReports] = useState([])
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set())
 
   // Restaurant Engine's own paginated/searchable table view
   const [restaurantTableRows, setRestaurantTableRows] = useState([])
@@ -277,6 +301,19 @@ export default function App() {
   const [restaurantPage, setRestaurantPage] = useState(1)
   const [editingRestaurantId, setEditingRestaurantId] = useState(null)
   const [restaurantForm, setRestaurantForm] = useState(EMPTY_RESTAURANT_FORM)
+  const [starHistoryForm, setStarHistoryForm] = useState([])
+  // Only true once the current restaurant's history has actually been
+  // fetched — guards submitRestaurant from overwriting real history with an
+  // empty array if that fetch failed or hasn't resolved yet.
+  const [starHistoryLoaded, setStarHistoryLoaded] = useState(false)
+  const [hoursForm, setHoursForm] = useState([])
+  // Same guard as starHistoryLoaded, for the weekly hours editor.
+  const [hoursLoaded, setHoursLoaded] = useState(false)
+  // Tracks which restaurant's history fetch is the most recent one
+  // requested — without it, clicking Edit on A then quickly on B before A's
+  // fetch resolves would let A's history land in the form after B's own
+  // fetch already applied, silently attaching A's history to B on save.
+  const editingRestaurantRequestRef = useRef(null)
 
   const [deviceForm, setDeviceForm] = useState({ tag_id: '', salt: '' })
   const [nfcFilters, setNfcFilters] = useState({ year: '', city: '', cuisine: '' })
@@ -289,6 +326,7 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState(null)
   const [selectedUserHistory, setSelectedUserHistory] = useState(null)
   const [manualVerifyForm, setManualVerifyForm] = useState({ restaurant_id: null, note: '' })
+  const restaurantFormInitialRef = useRef(JSON.stringify(EMPTY_RESTAURANT_FORM))
 
   useEffect(() => {
     const token = getToken()
@@ -313,6 +351,7 @@ export default function App() {
     fetchCuisines()
     fetchStats()
     fetchAuditLogs()
+    fetchReports()
   }, [currentAdmin])
 
   useEffect(() => {
@@ -334,6 +373,18 @@ export default function App() {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAdmin, userSearch])
+
+  const restaurantFormDirty = editingRestaurantId !== null && JSON.stringify(restaurantForm) !== restaurantFormInitialRef.current
+
+  useEffect(() => {
+    function warnBeforeLeave(event) {
+      if (!restaurantFormDirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeLeave)
+    return () => window.removeEventListener('beforeunload', warnBeforeLeave)
+  }, [restaurantFormDirty])
 
   // Tag ID is always a fresh auto-incrementing serial; salt is only
   // (re)generated when it's empty, so an in-progress "Regenerate" click
@@ -426,6 +477,27 @@ export default function App() {
     }
   }
 
+  async function fetchReports() {
+    try {
+      const data = await api.reports()
+      setReports(data.reports || [])
+    } catch (err) {
+      toast.push('error', `Failed to load review reports: ${err.message}`)
+    }
+  }
+
+  async function handleReportAction(reportId, action) {
+    await guard.run(`report-${action}-${reportId}`, async () => {
+      try {
+        await api.resolveReport(reportId, { action })
+        toast.push('success', action === 'dismiss' ? 'Report dismissed' : 'Review deleted')
+        fetchReports()
+      } catch (err) {
+        toast.push('error', err.message)
+      }
+    })
+  }
+
   async function refreshRestaurantViews() {
     await Promise.all([fetchRestaurants(), fetchRestaurantTable(), fetchStats()])
   }
@@ -449,6 +521,16 @@ export default function App() {
     [filteredRestaurants, deviceRestaurantId]
   )
 
+  const globalResults = useMemo(() => {
+    const query = globalSearch.trim().toLowerCase()
+    if (!query) return []
+    return [
+      ...restaurants.filter((r) => `${r.name} ${r.city} ${r.country}`.toLowerCase().includes(query)).slice(0, 5).map((r) => ({ type: 'Restaurant', label: restaurantLabel(r), tab: 'restaurants', id: r.id })),
+      ...users.filter((u) => `${u.display_name} ${u.email}`.toLowerCase().includes(query)).slice(0, 5).map((u) => ({ type: 'User', label: `${u.display_name} — ${u.email}`, tab: 'users', id: u.id })),
+      ...devices.filter((d) => (d.tag_id || '').toLowerCase().includes(query)).slice(0, 5).map((d) => ({ type: 'NFC Device', label: d.tag_id, tab: 'devices', id: d.id })),
+    ].slice(0, 8)
+  }, [globalSearch, restaurants, users, devices])
+
   const reassignMatch = useMemo(
     () => restaurants.find((r) => r.id === reassignRestaurantId),
     [restaurants, reassignRestaurantId]
@@ -461,22 +543,86 @@ export default function App() {
 
   const restaurantTotalPages = Math.max(1, Math.ceil(restaurantTableTotal / RESTAURANT_PAGE_SIZE))
 
-  function startEditRestaurant(item) {
+  async function startEditRestaurant(item) {
     setEditingRestaurantId(item.id)
-    setRestaurantForm({ name: item.name, city: item.city, cuisine: item.cuisine, stars: item.stars, year_awarded: item.year_awarded })
+    const nextForm = { name: item.name, city: item.city, cuisine: item.cuisine, stars: item.stars, year_awarded: item.year_awarded, reservation_release_day: item.reservation_release_day || 0, price_tier: item.price_tier || 0, reservation_platform: item.reservation_platform || '', reservation_url: item.reservation_url || '', photo_url: item.photo_url || '' }
+    restaurantFormInitialRef.current = JSON.stringify(nextForm)
+    setRestaurantForm(nextForm)
+    // The list view doesn't carry star_history/hours (kept out of that
+    // payload on purpose) — fetch the full record just for the edit form.
+    setStarHistoryForm([])
+    setStarHistoryLoaded(false)
+    setHoursForm(fillWeekHours([]))
+    setHoursLoaded(false)
+    editingRestaurantRequestRef.current = item.id
+    try {
+      const full = await api.restaurant(item.id)
+      // A newer Edit click may have started (and possibly already
+      // resolved) while this fetch was in flight — only apply it if it's
+      // still the most recently requested restaurant.
+      if (editingRestaurantRequestRef.current !== item.id) return
+      setStarHistoryForm((full.star_history || []).slice().sort((a, b) => a.year - b.year).map((h) => ({ year: h.year, stars: h.stars })))
+      setStarHistoryLoaded(true)
+      setHoursForm(fillWeekHours(full.hours))
+      setHoursLoaded(true)
+    } catch (err) {
+      if (editingRestaurantRequestRef.current !== item.id) return
+      toast.push('error', `Could not load star history: ${err.message}`)
+    }
+  }
+
+  function openGlobalResult(result) {
+    setGlobalSearch('')
+    setTab(result.tab)
+    if (result.type === 'Restaurant') {
+      const item = restaurants.find((r) => r.id === result.id)
+      if (item) startEditRestaurant(item)
+    } else if (result.type === 'User') {
+      const user = users.find((u) => u.id === result.id)
+      if (user) openUserHistory(user)
+    } else if (result.type === 'NFC Device') {
+      setDeviceRestaurantId(devices.find((d) => d.id === result.id)?.restaurant_id || null)
+    }
   }
 
   function cancelEditRestaurant() {
+    if (restaurantFormDirty && !window.confirm('You have unsaved changes. Leave without saving?')) return
+    editingRestaurantRequestRef.current = null
     setEditingRestaurantId(null)
     setRestaurantForm(EMPTY_RESTAURANT_FORM)
+    setStarHistoryForm([])
+    setStarHistoryLoaded(false)
+    setHoursForm([])
+    setHoursLoaded(false)
   }
 
   async function submitRestaurant(e) {
     e.preventDefault()
+    if (!restaurantForm.name.trim() || !restaurantForm.city.trim() || !restaurantForm.cuisine.trim()) {
+      toast.push('error', 'Name, city, and cuisine are required')
+      return
+    }
+    const duplicate = restaurants.find((r) => r.id !== editingRestaurantId && r.name.trim().toLowerCase() === restaurantForm.name.trim().toLowerCase() && r.city.trim().toLowerCase() === restaurantForm.city.trim().toLowerCase())
+    if (duplicate) {
+      toast.push('error', `A restaurant named ${duplicate.name} already exists in ${duplicate.city}`)
+      return
+    }
+    if (restaurantForm.reservation_platform && !restaurantForm.reservation_url.trim()) {
+      toast.push('error', 'Add a booking link, or set the platform back to None')
+      return
+    }
     await guard.run('restaurant-form', async () => {
       try {
         if (editingRestaurantId) {
           await api.updateRestaurant(editingRestaurantId, restaurantForm)
+          // Only push history/hours if they actually loaded — never
+          // overwrite real data with an empty set because the fetch failed.
+          if (starHistoryLoaded) {
+            await api.updateRestaurantStarHistory(editingRestaurantId, starHistoryForm)
+          }
+          if (hoursLoaded) {
+            await api.updateRestaurantHours(editingRestaurantId, hoursForm)
+          }
           toast.push('success', 'Restaurant updated')
         } else {
           await api.createRestaurant(restaurantForm)
@@ -650,6 +796,25 @@ export default function App() {
     }
   }
 
+  async function bulkBanUsers() {
+    const selected = users.filter((user) => selectedUserIds.has(user.id))
+    const skippedAdmins = selected.filter((user) => user.role === 'admin')
+    const targets = selected.filter((user) => user.role !== 'admin' && !user.banned)
+    const ids = targets.map((user) => user.id)
+    if (!ids.length) return
+    if (!window.confirm(`Ban ${ids.length} selected user${ids.length === 1 ? '' : 's'}? Admin accounts and already banned users will be skipped.`)) return
+    const results = await Promise.allSettled(ids.map((id) => api.banUser(id)))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    try {
+      setSelectedUserIds(new Set())
+      const succeeded = ids.length - failed
+      toast.push(failed ? 'error' : 'success', `${succeeded} banned, ${failed} failed${skippedAdmins.length ? `, ${skippedAdmins.length} admin skipped` : ''}`)
+      fetchUsers()
+    } catch (err) {
+      toast.push('error', `Could not refresh users: ${err.message}`)
+    }
+  }
+
   async function handleBanToggle(user) {
     if (!user.banned && !window.confirm(`Ban ${user.display_name}? They will be unable to log in.`)) return
     await guard.run(`user-ban-${user.id}`, async () => {
@@ -719,6 +884,9 @@ export default function App() {
             <button className={tab === 'security' ? 'pill active' : 'pill'} onClick={() => setTab('security')}>
               Security Dashboard
             </button>
+            <button className={tab === 'reports' ? 'pill active' : 'pill'} onClick={() => setTab('reports')}>
+              Review Reports
+            </button>
             <button className={tab === 'users' ? 'pill active' : 'pill'} onClick={() => setTab('users')}>
               Users
             </button>
@@ -729,6 +897,30 @@ export default function App() {
           <button className="pill" onClick={logout}>{currentAdmin.display_name} · Log out</button>
         </div>
       </header>
+
+      <div className="admin-global-search" style={{ position: 'relative', marginBottom: 20 }}>
+        <input
+          value={globalSearch}
+          onChange={(e) => {
+            const value = e.target.value
+            setGlobalSearch(value)
+            // Keep the user index behind global search in sync, while still
+            // reusing the debounced Users query and its existing API.
+            setUserSearch(value)
+          }}
+          placeholder="Search restaurants, users, or NFC tags..."
+          aria-label="Global admin search"
+        />
+        {globalSearch.trim() && (
+          <div className="admin-search-results" style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, background: '#17181d', border: '1px solid #343640', borderRadius: 12, padding: 8 }}>
+            {globalResults.length === 0 ? <p style={{ margin: 8, opacity: .65 }}>No matching records.</p> : globalResults.map((result, index) => (
+              <button key={`${result.type}-${index}`} type="button" className="search-result" onClick={() => openGlobalResult(result)} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'transparent', color: '#f3e6d0', border: 0, padding: '9px 10px', cursor: 'pointer' }}>
+                <strong style={{ color: '#d2a14c', marginRight: 8 }}>{result.type}</strong>{result.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {tab === 'dashboard' && (
         <section className="section-grid">
@@ -832,6 +1024,17 @@ export default function App() {
         </section>
       )}
 
+      {tab === 'dashboard' && stats && (
+        <section className="admin-panel wide-panel" style={{ marginBottom: 20 }}>
+          <div className="panel-header"><h3>Work Queue</h3><span className="field-hint">Next actions for the admin team</span></div>
+          <div className="stat-grid">
+            <button type="button" className="stat-tile" onClick={() => { setTab('security'); setAnomalyStatusFilter('open') }}><span className="stat-label">Open anomalies</span><span className="stat-value">{stats.open_anomalies || 0}</span><span className="field-hint">Review now →</span></button>
+            <button type="button" className="stat-tile" onClick={() => setTab('reports')}><span className="stat-label">Pending reports</span><span className="stat-value">{reports.length}</span><span className="field-hint">Moderate now →</span></button>
+            <button type="button" className="stat-tile" onClick={() => setTab('devices')}><span className="stat-label">Disabled devices</span><span className="stat-value">{devices.filter((d) => d.status === 'disabled').length}</span><span className="field-hint">Manage devices →</span></button>
+          </div>
+        </section>
+      )}
+
       {tab === 'restaurants' && (
         <section className="section-grid">
           <div className="panel-card">
@@ -856,23 +1059,29 @@ export default function App() {
                   <tr>
                     <th>Name</th>
                     <th>Stars</th>
+                    <th>Price</th>
+                    <th>Booking</th>
                     <th>City</th>
                     <th>Cuisine</th>
                     <th>Year</th>
+                    <th>Next Release</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {restaurantTableRows.length === 0 && (
-                    <tr><td colSpan={6} style={{ opacity: 0.6 }}>No restaurants found.</td></tr>
+                    <tr><td colSpan={9} style={{ opacity: 0.6 }}>No restaurants found.</td></tr>
                   )}
                   {restaurantTableRows.map((item) => (
                     <tr key={item.id}>
                       <td>{item.name}</td>
                       <td>{item.stars}</td>
+                      <td>{item.price_tier ? '💰'.repeat(item.price_tier) : '—'}</td>
+                      <td>{item.reservation_platform ? RESERVATION_PLATFORMS.find((p) => p.value === item.reservation_platform)?.label : '—'}</td>
                       <td>{item.city}</td>
                       <td>{item.cuisine}</td>
                       <td>{item.year_awarded}</td>
+                      <td>{item.next_reservation_release ? new Date(item.next_reservation_release).toLocaleDateString() : '—'}</td>
                       <td>
                         <div className="table-actions">
                           <button type="button" className="icon-btn" onClick={() => startEditRestaurant(item)}>Edit</button>
@@ -948,6 +1157,182 @@ export default function App() {
                 Year Awarded
                 <input type="number" value={restaurantForm.year_awarded} onChange={(e) => setRestaurantForm({ ...restaurantForm, year_awarded: Number(e.target.value) })} />
               </label>
+              <label>
+                Price Tier
+                <input
+                  type="number"
+                  min="0"
+                  max="3"
+                  step="1"
+                  placeholder="0 = unknown"
+                  value={restaurantForm.price_tier}
+                  onChange={(e) => setRestaurantForm({ ...restaurantForm, price_tier: clampPriceTier(Number(e.target.value)) })}
+                />
+                <span className="field-hint">1-3 money-sign tier (💰/💰💰/💰💰💰). Leave 0 if unknown.</span>
+              </label>
+              <label>
+                Photo
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!file) return
+                    guard.run('restaurant-photo-upload', async () => {
+                      try {
+                        const { photo_url } = await api.uploadRestaurantPhoto(file)
+                        setRestaurantForm((prev) => ({ ...prev, photo_url }))
+                      } catch (err) {
+                        toast.push('error', err.message)
+                      }
+                    })
+                  }}
+                />
+                {guard.isPending('restaurant-photo-upload') && <span className="field-hint">Uploading…</span>}
+                {restaurantForm.photo_url && (
+                  <img src={restaurantForm.photo_url} alt="" style={{ width: 120, height: 90, objectFit: 'cover', borderRadius: 6, marginTop: 6 }} />
+                )}
+                <input
+                  type="url"
+                  placeholder="Or paste a photo URL directly"
+                  value={restaurantForm.photo_url}
+                  onChange={(e) => setRestaurantForm({ ...restaurantForm, photo_url: e.target.value })}
+                  style={{ marginTop: 6 }}
+                />
+              </label>
+              <label>
+                Reservation Release Day
+                <input
+                  type="number"
+                  min="0"
+                  max="31"
+                  step="1"
+                  placeholder="0 = no recurring schedule"
+                  value={restaurantForm.reservation_release_day}
+                  onChange={(e) => setRestaurantForm({ ...restaurantForm, reservation_release_day: Number(e.target.value) })}
+                />
+                <span className="field-hint">Day of month reservations open, e.g. 1. Leave 0 if there's no recurring schedule.</span>
+              </label>
+              <label>
+                Online Booking Platform
+                <select
+                  value={restaurantForm.reservation_platform}
+                  onChange={(e) => {
+                    const reservation_platform = e.target.value
+                    setRestaurantForm((prev) => ({
+                      ...prev,
+                      reservation_platform,
+                      reservation_url: reservation_platform ? prev.reservation_url : '',
+                    }))
+                  }}
+                >
+                  {RESERVATION_PLATFORMS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              {restaurantForm.reservation_platform && (
+                <label>
+                  Booking Link
+                  <input
+                    type="url"
+                    placeholder="https://www.opentable.com/r/..."
+                    value={restaurantForm.reservation_url}
+                    onChange={(e) => setRestaurantForm({ ...restaurantForm, reservation_url: e.target.value })}
+                  />
+                  <span className="field-hint">StarTrack doesn't take bookings itself — this just links guests out to the real platform.</span>
+                </label>
+              )}
+              {editingRestaurantId && (
+                <div className="star-history-editor">
+                  <span className="field-hint" style={{ display: 'block', marginBottom: 6 }}>
+                    Star History — the tier this restaurant held in each past guide year
+                  </span>
+                  {starHistoryForm.map((entry, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        placeholder="Year"
+                        value={entry.year}
+                        style={{ width: 90 }}
+                        onChange={(e) => {
+                          const year = Number(e.target.value)
+                          setStarHistoryForm((prev) => prev.map((row, idx) => (idx === i ? { ...row, year } : row)))
+                        }}
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="3"
+                        placeholder="Stars"
+                        value={entry.stars}
+                        style={{ width: 70 }}
+                        onChange={(e) => {
+                          const stars = clampStars(Number(e.target.value))
+                          setStarHistoryForm((prev) => prev.map((row, idx) => (idx === i ? { ...row, stars } : row)))
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setStarHistoryForm((prev) => prev.filter((_, idx) => idx !== i))}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setStarHistoryForm((prev) => [...prev, { year: restaurantForm.year_awarded, stars: restaurantForm.stars }])}
+                  >
+                    + Add Year
+                  </button>
+                </div>
+              )}
+              {editingRestaurantId && (
+                <div className="hours-editor">
+                  <span className="field-hint" style={{ display: 'block', marginBottom: 6 }}>
+                    Opening Hours — set per day; check Closed for a day with no hours
+                  </span>
+                  {hoursForm.map((entry, i) => (
+                    <div key={entry.day_of_week} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                      <span style={{ width: 90 }}>{WEEKDAY_LABELS[entry.day_of_week]}</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={entry.is_closed}
+                          onChange={(e) => {
+                            const is_closed = e.target.checked
+                            setHoursForm((prev) => prev.map((row, idx) => (idx === i ? { ...row, is_closed } : row)))
+                          }}
+                        />
+                        Closed
+                      </label>
+                      <input
+                        type="time"
+                        value={entry.open_time}
+                        disabled={entry.is_closed}
+                        onChange={(e) => {
+                          const open_time = e.target.value
+                          setHoursForm((prev) => prev.map((row, idx) => (idx === i ? { ...row, open_time } : row)))
+                        }}
+                      />
+                      <span>–</span>
+                      <input
+                        type="time"
+                        value={entry.close_time}
+                        disabled={entry.is_closed}
+                        onChange={(e) => {
+                          const close_time = e.target.value
+                          setHoursForm((prev) => prev.map((row, idx) => (idx === i ? { ...row, close_time } : row)))
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
               <button type="submit" disabled={guard.isPending('restaurant-form')}>
                 {guard.isPending('restaurant-form') ? 'Saving…' : editingRestaurantId ? 'Save Changes' : 'Save Restaurant'}
               </button>
@@ -1175,6 +1560,13 @@ export default function App() {
                     <span className={`status-badge status-${item.status}`}>{item.status}</span>
                   </div>
                   <p>{item.description}</p>
+                  <div className="anomaly-details" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, margin: '12px 0', fontSize: 12, opacity: .8 }}>
+                    <span>User: #{item.user_id || '—'}</span>
+                    <span>Restaurant: #{item.restaurant_id || '—'}</span>
+                    <span>Check-in: #{item.checkin_id || '—'}</span>
+                    <span>Device: #{item.device_id || '—'}</span>
+                    <span>Created: {item.created_at ? new Date(item.created_at).toLocaleString() : '—'}</span>
+                  </div>
                   {item.status === 'open' && (
                     <div className="table-actions">
                       <button
@@ -1232,6 +1624,61 @@ export default function App() {
         </section>
       )}
 
+      {tab === 'reports' && (
+        <section className="section-grid">
+          <div className="panel-card">
+            <h2>Review Reports</h2>
+            <p>Moderation queue for user-submitted complaints about reviews that may be spam, abusive, or otherwise inappropriate.</p>
+          </div>
+          <div className="admin-panel wide-panel">
+            <div className="panel-header">
+              <h3>Open Report Queue</h3>
+              <button type="button" className="pill" onClick={fetchReports} aria-label="Refresh reports">🔄 Refresh</button>
+            </div>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Review</th>
+                    <th>Reporter</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Details</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.length === 0 && (
+                    <tr><td colSpan={8} style={{ opacity: 0.6 }}>No review reports queued.</td></tr>
+                  )}
+                  {reports.map((report) => (
+                    <tr key={report.id}>
+                      <td>#{report.id}</td>
+                      <td>Review #{report.review_id}</td>
+                      <td>User #{report.user_id}</td>
+                      <td>{report.reason}</td>
+                      <td><StatusBadge active={report.status === 'open'} activeLabel="Open" inactiveLabel={report.status || 'Closed'} /></td>
+                      <td>{new Date(report.created_at).toLocaleString()}</td>
+                      <td>{report.details || '—'}</td>
+                      <td>
+                        {report.status === 'open' && (
+                          <div className="table-actions">
+                            <button type="button" className="icon-btn" disabled={guard.isPending(`report-dismiss-${report.id}`)} onClick={() => handleReportAction(report.id, 'dismiss')} title="Dismiss this report as false positive">{guard.isPending(`report-dismiss-${report.id}`) ? '…' : 'Dismiss'}</button>
+                            <button type="button" className="icon-btn" disabled={guard.isPending(`report-delete_review-${report.id}`)} onClick={() => { if (window.confirm('Delete the flagged review? This cannot be undone.')) { handleReportAction(report.id, 'delete_review') } }} title="Delete the flagged review and mark report resolved">{guard.isPending(`report-delete_review-${report.id}`) ? 'Deleting…' : 'Delete Review'}</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
       {tab === 'users' && (
         <section className="section-grid">
           <div className="panel-card">
@@ -1246,10 +1693,17 @@ export default function App() {
               Search
               <input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search by email or name" />
             </label>
+            {selectedUserIds.size > 0 && (
+              <div className="panel-header" style={{ marginBottom: 12 }}>
+                <span>{selectedUserIds.size} selected</span>
+                <button type="button" className="icon-btn" onClick={bulkBanUsers}>Ban Selected Users</button>
+              </div>
+            )}
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
+                    <th><input type="checkbox" aria-label="Select all visible users" checked={users.length > 0 && users.every((u) => selectedUserIds.has(u.id))} onChange={(e) => setSelectedUserIds((prev) => { const next = new Set(prev); users.forEach((u) => e.target.checked ? next.add(u.id) : next.delete(u.id)); return next })} /></th>
                     <th>Name</th>
                     <th>Email</th>
                     <th>Role</th>
@@ -1260,9 +1714,10 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.length === 0 && <tr><td colSpan={7} style={{ opacity: 0.6 }}>No users found.</td></tr>}
+                  {users.length === 0 && <tr><td colSpan={8} style={{ opacity: 0.6 }}>No users found.</td></tr>}
                   {users.map((u) => (
                     <tr key={u.id}>
+                      <td><input type="checkbox" aria-label={`Select ${u.display_name}`} checked={selectedUserIds.has(u.id)} onChange={(e) => setSelectedUserIds((prev) => { const next = new Set(prev); e.target.checked ? next.add(u.id) : next.delete(u.id); return next })} /></td>
                       <td>{u.display_name}</td>
                       <td>{u.email}</td>
                       <td>{u.role}</td>

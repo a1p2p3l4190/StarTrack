@@ -3,14 +3,12 @@
     "name": "StarTrack",
     "slug": "startrack-mobile",
     "version": "1.0.0",
-    "sdkVersion": "49.0.0",
     "platforms": ["ios", "android", "web"],
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09090d",
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#121212"
+      "backgroundColor": "#09090d"
     },
     "updates": {
       "fallbackToCacheTimeout": 0
