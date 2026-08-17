@@ -60,7 +60,7 @@ function ChartTooltip({ active, payload, label }) {
 // 7-day check-in trend — Verified (highlighted, blue) vs Total attempts
 // (muted, dashed) so the gap between the two reads as the failure rate.
 export function CheckinTrendChart({ data }) {
-  const formatted = useMemo(() => data.map((d) => ({ ...d, label: formatShortDate(d.date) })), [data])
+  const formatted = useMemo(() => (data || []).map((d) => ({ ...d, label: formatShortDate(d.date) })), [data])
   const ticks = useMemo(() => {
     const maxValue = formatted.reduce((max, d) => Math.max(max, d.total ?? 0, d.verified ?? 0), 0)
     return niceIntegerTicks(maxValue)
@@ -88,7 +88,7 @@ export function CheckinTrendChart({ data }) {
 // everything else folds into "Other" (see palette note above).
 export function CityBreakdownChart({ data }) {
   const slices = useMemo(() => {
-    const sorted = [...data].sort((a, b) => b.count - a.count)
+    const sorted = [...(data || [])].sort((a, b) => b.count - a.count)
     const top = sorted.slice(0, 3)
     const rest = sorted.slice(3)
     const otherCount = rest.reduce((sum, r) => sum + r.count, 0)

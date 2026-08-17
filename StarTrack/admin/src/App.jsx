@@ -978,7 +978,7 @@ export default function App() {
                     <h3>Check-in Trend (Last 7 Days)</h3>
                   </div>
                   <ErrorBoundary resetKey={JSON.stringify(stats.daily_trend)}>
-                    <CheckinTrendChart data={stats.daily_trend} />
+                    <CheckinTrendChart data={stats.daily_trend || []} />
                   </ErrorBoundary>
                 </div>
                 <div className="admin-panel">
@@ -986,7 +986,7 @@ export default function App() {
                     <h3>Verified Check-ins by City</h3>
                   </div>
                   <ErrorBoundary resetKey={JSON.stringify(stats.city_breakdown)}>
-                    <CityBreakdownChart data={stats.city_breakdown} />
+                    <CityBreakdownChart data={stats.city_breakdown || []} />
                   </ErrorBoundary>
                 </div>
               </div>
@@ -1005,10 +1005,10 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {stats.top_restaurants.length === 0 && (
+                        {(stats.top_restaurants || []).length === 0 && (
                           <tr><td colSpan={2} style={{ opacity: 0.6 }}>No verified check-ins yet.</td></tr>
                         )}
-                        {stats.top_restaurants.map((r) => (
+                        {(stats.top_restaurants || []).map((r) => (
                           <tr key={r.id}>
                             <td>{r.name}</td>
                             <td>{r.verified_checkins}</td>
@@ -1762,10 +1762,10 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedUserHistory.checkins.length === 0 && (
+                      {(selectedUserHistory.checkins || []).length === 0 && (
                         <tr><td colSpan={4} style={{ opacity: 0.6 }}>No check-ins yet.</td></tr>
                       )}
-                      {selectedUserHistory.checkins.map((ci) => (
+                      {(selectedUserHistory.checkins || []).map((ci) => (
                         <tr key={ci.id}>
                           <td>{ci.restaurant?.name || `#${ci.restaurant_id}`}</td>
                           <td>{ci.verified ? 'Yes' : 'No'}</td>

@@ -31,7 +31,7 @@ func getUserHistoryHandler(c *gin.Context) {
 		RespondNotFound(c, "User not found")
 		return
 	}
-	var checkins []CheckIn
+	checkins := []CheckIn{}
 	db.Preload("Restaurant").Where("user_id = ?", user.ID).Order("created_at desc").Find(&checkins)
 	RespondSuccess(c, http.StatusOK, map[string]interface{}{"user": user, "checkins": checkins})
 }

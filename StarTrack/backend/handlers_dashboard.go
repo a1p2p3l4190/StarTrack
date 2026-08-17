@@ -48,7 +48,7 @@ func adminStatsHandler(c *gin.Context) {
 		anomalyRate = float64(openAnomalies) / float64(totalCheckins) * 100
 	}
 
-	var top []topRestaurantStat
+	top := []topRestaurantStat{}
 	db.Table("checkins").
 		Select("restaurants.id as id, restaurants.name as name, COUNT(*) as verified_count").
 		Joins("JOIN restaurants ON restaurants.id = checkins.restaurant_id").
