@@ -26,7 +26,8 @@
       }
     },
     "android": {
-      "package": "com.chuchu6.startrackmobile"
+      "package": "com.chuchu6.startrackmobile",
+      "kotlinVersion": "2.1.0"
     }
   }
 }

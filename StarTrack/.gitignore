@@ -23,3 +23,6 @@ backend/uploads/
 .vscode
 .DS_Store
 *.swp
+
+android/
+ios/
