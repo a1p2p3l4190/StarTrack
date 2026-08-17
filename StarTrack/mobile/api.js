@@ -8,7 +8,7 @@ import { resolveApiBase } from './utils';
 // Android emulator) needs the dev machine's LAN IP instead, which we derive
 // from the same host Expo/Metro was already reached through.
 const detectedHostUri = Constants.expoConfig?.hostUri || Constants.expoGoConfig?.debuggerHost;
-export const API_BASE = resolveApiBase(detectedHostUri, Platform.OS);
+export const API_BASE = process.env.EXPO_PUBLIC_API_URL || resolveApiBase(detectedHostUri, Platform.OS);
 
 // SecureStore wraps iOS Keychain / Android Keystore — hardware-backed
 // encryption at rest, not just "somewhere on disk" like AsyncStorage. It has

@@ -3,7 +3,11 @@
     "name": "StarTrack",
     "slug": "startrack-mobile",
     "version": "1.0.0",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#09090d",
@@ -13,6 +17,16 @@
     "updates": {
       "fallbackToCacheTimeout": 0
     },
-    "assetBundlePatterns": ["**/*"]
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "74302b31-1100-4714-9d43-5d6038509d46"
+      }
+    },
+    "android": {
+      "package": "com.chuchu6.startrackmobile"
+    }
   }
 }
