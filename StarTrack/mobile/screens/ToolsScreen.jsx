@@ -1,9 +1,10 @@
 // screens/ToolsScreen.jsx
-import React, { useEffect, useState } from 'react';
-import { Text, TextInput, View, Pressable, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard, Alert, Image } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Text, TextInput, View, Pressable, Animated, KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard, Alert, Image } from 'react-native';
 import { styles } from '../styles';
 import { api } from '../api';
 import { scheduleReservationReleaseReminder } from '../reminderScheduler';
+import { cancelNotification } from '../notificationService';
 import StarMap from '../components/StarMap';
 
 export default function ToolsScreen({
@@ -12,6 +13,19 @@ export default function ToolsScreen({
   const [wishlist, setWishlist] = useState([]);
   const [activeSection, setActiveSection] = useState('bill');
   const [reminders, setReminders] = useState({});
+  const [reminderPending, setReminderPending] = useState({});
+  const [webReminderFeedback, setWebReminderFeedback] = useState({});
+  const [billCopied, setBillCopied] = useState(false);
+  const billButtonScale = useRef(new Animated.Value(1)).current;
+
+  const animateBillButton = (toValue) => {
+    Animated.spring(billButtonScale, {
+      toValue,
+      friction: 7,
+      tension: 180,
+      useNativeDriver: true,
+    }).start();
+  };
 
   useEffect(() => {
     api.wishlist()
@@ -29,15 +43,46 @@ export default function ToolsScreen({
   // off `restaurants` (fetched fresh each app open) so it's always the true
   // next occurrence, even after this month's date has already rolled over.
   const remindWishlistItem = async (item) => {
+    if (reminderPending[item.id] || reminders[item.id]) return;
     const restaurant = restaurantById(item.restaurant_id);
     if (!restaurant?.next_reservation_release) return;
-    const id = await scheduleReservationReleaseReminder(restaurant.name, restaurant.next_reservation_release);
-    if (id) {
-      setReminders((prev) => ({ ...prev, [item.id]: true }));
-      Alert.alert('Reminder set', `We'll notify you the day before reservations open at ${restaurant.name}.`);
-    } else {
-      Alert.alert('Could not set reminder', 'That release date is less than 24 hours away, or reminders aren’t supported on this platform.');
+    setReminderPending((prev) => ({ ...prev, [item.id]: true }));
+    try {
+      const id = await scheduleReservationReleaseReminder(restaurant.name, restaurant.next_reservation_release);
+      if (id) {
+        setReminders((prev) => ({ ...prev, [item.id]: id }));
+        Alert.alert('Reminder set', `We'll notify you the day before reservations open at ${restaurant.name}.`);
+      } else {
+        if (Platform.OS === 'web') {
+          setReminders((prev) => ({ ...prev, [item.id]: 'web-preview' }));
+          setWebReminderFeedback((prev) => ({ ...prev, [item.id]: true }));
+        } else {
+          Alert.alert('Could not set reminder', 'That release date is less than 24 hours away, or reminders aren’t supported on this platform.');
+        }
+      }
+    } finally {
+      setReminderPending((prev) => ({ ...prev, [item.id]: false }));
     }
+  };
+
+  const cancelWishlistReminder = async (item) => {
+    const notificationId = reminders[item.id];
+    if (!notificationId) return;
+    if (notificationId !== 'web-preview') {
+      await cancelNotification(notificationId);
+    }
+    setReminders((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    setWebReminderFeedback((prev) => ({ ...prev, [item.id]: false }));
+  };
+
+  const handleCopyBill = () => {
+    onSharePress();
+    setBillCopied(true);
+    setTimeout(() => setBillCopied(false), 2000);
   };
 
   const removeWishlistItem = async (id) => {
@@ -142,9 +187,16 @@ export default function ToolsScreen({
                     <Text style={styles.shareAmountValue}>${billDetails.perPerson}</Text>
                   </View>
 
-                  <Pressable style={styles.copyShareButton} onPress={onSharePress}>
-                    <Text style={styles.copyShareButtonText}>📋 Copy Bill Summary</Text>
-                  </Pressable>
+                  <Animated.View style={{ transform: [{ scale: billButtonScale }] }}>
+                    <Pressable
+                      style={styles.copyShareButton}
+                      onPressIn={() => animateBillButton(0.96)}
+                      onPressOut={() => animateBillButton(1)}
+                      onPress={handleCopyBill}
+                    >
+                      <Text style={styles.copyShareButtonText}>{billCopied ? '✓ Copied' : '📋 Copy Bill Summary'}</Text>
+                    </Pressable>
+                  </Animated.View>
                 </View>
               </View>
             </View>}
@@ -184,8 +236,8 @@ export default function ToolsScreen({
                             {nextRelease && (
                               <View style={{ marginTop: 6 }}>
                                 <Text style={styles.wishMeta}>📅 Next opens {new Date(nextRelease).toLocaleDateString()}</Text>
-                                <Pressable onPress={() => remindWishlistItem(item)} style={{ marginTop: 4 }}>
-                                  <Text style={{ color: reminders[item.id] ? '#7ce8b4' : '#d2a14c', fontSize: 12, fontWeight: '700' }}>{reminders[item.id] ? '✓ Reminder Set' : '🔔 Remind Me'}</Text>
+                                <Pressable onPress={() => remindWishlistItem(item)} disabled={!!reminderPending[item.id] || !!reminders[item.id]} style={{ marginTop: 4, opacity: reminders[item.id] ? 0.7 : 1 }}>
+                                  <Text style={{ color: reminders[item.id] ? '#7ce8b4' : '#d2a14c', fontSize: 12, fontWeight: '700' }}>{reminders[item.id] ? (webReminderFeedback[item.id] ? '✓ Reminder Preview' : '✓ Reminder Set') : reminderPending[item.id] ? 'Setting…' : '🔔 Remind Me'}</Text>
                                 </Pressable>
                               </View>
                             )}
@@ -212,17 +264,17 @@ export default function ToolsScreen({
               <View style={styles.section}>
                 <Text style={styles.sectionHeading}>Reservation Reminders</Text>
                 <Text style={{ color: '#8e8982', fontSize: 12, lineHeight: 18, marginBottom: 14 }}>Keep track of when your saved restaurants open their next reservation window.</Text>
-                {wishlist.filter((item) => restaurantById(item.restaurant_id)?.next_reservation_release).length === 0 ? (
+                {wishlist.filter((item) => reminders[item.id] && restaurantById(item.restaurant_id)?.next_reservation_release).length === 0 ? (
                   <View style={styles.splitterCard}>
-                    <Text style={styles.starMapText}>No upcoming reservation windows yet.</Text>
+                    <Text style={styles.starMapText}>No active reminders yet.</Text>
                     {onExplore && <Pressable onPress={onExplore} style={[styles.copyShareButton, { marginTop: 14 }]}><Text style={styles.copyShareButtonText}>Explore Restaurants</Text></Pressable>}
                   </View>
-                ) : wishlist.filter((item) => restaurantById(item.restaurant_id)?.next_reservation_release).map((item) => {
+                ) : wishlist.filter((item) => reminders[item.id] && restaurantById(item.restaurant_id)?.next_reservation_release).map((item) => {
                   const restaurant = restaurantById(item.restaurant_id);
                   return <View key={item.id} style={[styles.splitterCard, { marginBottom: 10, padding: 16 }]}>
                     <Text style={styles.wishName}>{restaurant.name}</Text>
                     <Text style={styles.wishSub}>Reservations open {new Date(restaurant.next_reservation_release).toLocaleDateString()}</Text>
-                    <Pressable onPress={() => remindWishlistItem(item)} style={[styles.copyShareButton, { marginTop: 12 }]}><Text style={styles.copyShareButtonText}>{reminders[item.id] ? '✓ Reminder Set' : 'Set Reminder'}</Text></Pressable>
+                    <Pressable onPress={() => cancelWishlistReminder(item)} disabled={!reminders[item.id] || !!reminderPending[item.id]} style={[styles.copyShareButton, { marginTop: 12, opacity: reminders[item.id] ? 1 : 0.65 }]}><Text style={styles.copyShareButtonText}>Cancel Reminder</Text></Pressable>
                   </View>;
                 })}
               </View>
