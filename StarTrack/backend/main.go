@@ -53,8 +53,6 @@ func setupRouter(cfg *Config) *gin.Engine {
 			"http://localhost:8082",
 			"https://main.d4wh807cv4n11.amplifyapp.com",
 			"https://star-track-eta.vercel.app",
-			"exp://localhost:8081",
-			"exp://localhost:8082",
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
