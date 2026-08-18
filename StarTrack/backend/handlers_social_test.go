@@ -79,6 +79,33 @@ func TestLeaderboard_OrdersByScoreDescending(t *testing.T) {
 	}
 }
 
+func TestLeaderboard_ExcludesAdminsAndLimitsToTop20(t *testing.T) {
+	router, _ := newTestApp(t)
+	adminToken, adminID := registerAdmin(t, router, "leader-admin@example.com", "hunter22", "Admin Leader")
+	_ = adminToken
+	for i := 0; i < 21; i++ {
+		_, id := registerUser(t, router, fmt.Sprintf("leader-user-%d@example.com", i), "hunter22", fmt.Sprintf("User %d", i))
+		db.Model(&User{}).Where("id = ?", id).Update("score", 100-i)
+	}
+	db.Model(&User{}).Where("id = ?", adminID).Update("score", 1000)
+
+	w := doRequest(t, router, http.MethodGet, "/api/leaderboard", "", nil)
+	var resp struct {
+		Leaderboard []struct {
+			ID uint `json:"id"`
+		} `json:"leaderboard"`
+	}
+	decodeJSON(t, w, &resp)
+	if len(resp.Leaderboard) != 20 {
+		t.Fatalf("expected exactly 20 leaderboard entries, got %d", len(resp.Leaderboard))
+	}
+	for _, entry := range resp.Leaderboard {
+		if entry.ID == adminID {
+			t.Fatalf("admin %d should not appear on the leaderboard", adminID)
+		}
+	}
+}
+
 func TestAnomalies_RequiresAdmin(t *testing.T) {
 	router, _ := newTestApp(t)
 	userToken, _ := registerUser(t, router, "user@example.com", "hunter22", "Regular User")

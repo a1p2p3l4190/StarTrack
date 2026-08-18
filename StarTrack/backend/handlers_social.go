@@ -14,7 +14,7 @@ import (
 
 func leaderboardHandler(c *gin.Context) {
 	var users []User
-	db.Order("score desc, id asc").Limit(20).Find(&users)
+	db.Where("role <> ? OR role IS NULL", "admin").Order("score desc, id asc").Limit(20).Find(&users)
 
 	out := make([]gin.H, 0, len(users))
 	for _, u := range users {

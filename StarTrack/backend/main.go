@@ -47,7 +47,13 @@ func main() {
 func setupRouter(cfg *Config) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		// AllowOrigins:     []string{"*"},
+		AllowOrigins: []string{
+			"http://localhost:8081",
+			"http://localhost:8082",
+			"https://main.d4wh807cv4n11.amplifyapp.com/",
+			"https://star-track-eta.vercel.app",
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

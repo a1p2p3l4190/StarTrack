@@ -1,5 +1,12 @@
 package main
 
+import (
+	"fmt"
+	"time"
+
+	"gorm.io/gorm"
+)
+
 // seedData mirrors backend/db/schema.sql's seed section so `go run main.go`
 // against a brand-new database (without ever running the SQL script) still
 // boots with usable demo data. Both paths are safe to use together since
@@ -9,6 +16,8 @@ func seedData() {
 	seedBadges()
 	seedDemoUsers()
 	seedCitiesAndCuisines()
+	seedDemoActivity()
+	seedDemoAnomalies()
 }
 
 func seedRestaurantsAndDevices() {
@@ -111,4 +120,186 @@ func seedDemoUsers() {
 		{Email: "demo@startrack.app", PasswordHash: demoHash, DisplayName: "Laura Liu", Role: "user", Region: "Chicago"},
 	}
 	db.Create(&users)
+}
+
+// seedDemoActivity gives the demo login (demo@startrack.app) a few verified
+// checkins — some already reviewed so the passport/profile isn't empty on
+// first login, and a couple left unreviewed so a live demo can walk through
+// actually writing a review. Score is bumped by the same amounts
+// verifyCheckinHandler/createReviewHandler award in the real flow, so the
+// leaderboard and badge math stay consistent with organically earned points.
+func seedDemoActivity() {
+	var demoUser User
+	if err := db.Where("email = ?", "demo@startrack.app").First(&demoUser).Error; err != nil {
+		return
+	}
+
+	var count int64
+	db.Model(&CheckIn{}).Where("user_id = ?", demoUser.ID).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	var restaurants []Restaurant
+	db.Order("id asc").Find(&restaurants)
+	if len(restaurants) == 0 {
+		return
+	}
+
+	var devices []NFCDevice
+	db.Find(&devices)
+	deviceByRestaurant := make(map[uint]uint, len(devices))
+	for _, d := range devices {
+		deviceByRestaurant[d.RestaurantID] = d.ID
+	}
+
+	type seedVisit struct {
+		restaurantIdx int
+		daysAgo       int
+		reviewRating  int // 0 = leave unreviewed for a live demo review
+		reviewComment string
+	}
+	visits := []seedVisit{
+		{0, 12, 5, "The tasting menu at Aurum Table was worth every star — impeccable service and the wagyu course stole the show."},
+		{1, 7, 4, "Celeste Bistro nailed the classic French flavors; ambiance was a little loud for the price point."},
+		{2, 3, 0, ""},
+		{3, 1, 0, ""},
+	}
+
+	now := time.Now()
+	totalScoreGain := 0
+	for _, v := range visits {
+		if v.restaurantIdx >= len(restaurants) {
+			continue
+		}
+		r := restaurants[v.restaurantIdx]
+
+		var devicePtr *uint
+		if deviceID, ok := deviceByRestaurant[r.ID]; ok {
+			devicePtr = &deviceID
+		}
+
+		visitedAt := now.AddDate(0, 0, -v.daysAgo)
+		checkin := CheckIn{
+			UserID:       demoUser.ID,
+			RestaurantID: r.ID,
+			DeviceID:     devicePtr,
+			NFCSignature: fmt.Sprintf("seed-signature-%d-%d", demoUser.ID, r.ID),
+			Verified:     true,
+			VerifiedAt:   &visitedAt,
+			LocationLat:  r.LocationLat,
+			LocationLong: r.LocationLong,
+			CreatedAt:    visitedAt,
+		}
+		db.Create(&checkin)
+		totalScoreGain += r.Stars * 10
+
+		if v.reviewRating > 0 {
+			review := Review{
+				RestaurantID: r.ID,
+				UserID:       demoUser.ID,
+				CheckInID:    &checkin.ID,
+				Rating:       v.reviewRating,
+				Comment:      v.reviewComment,
+				CreatedAt:    visitedAt.Add(2 * time.Hour),
+			}
+			db.Create(&review)
+			totalScoreGain += 5
+		}
+	}
+
+	if totalScoreGain > 0 {
+		db.Model(&User{}).Where("id = ?", demoUser.ID).UpdateColumn("score", gorm.Expr("score + ?", totalScoreGain))
+	}
+}
+
+// seedDemoAnomalies gives the admin Security Dashboard something to show on
+// first login: a mix of severities and statuses (open/dismissed/confirmed)
+// wired to the checkins and devices seedDemoActivity/seedRestaurantsAndDevices
+// already created, rather than isolated rows with no drill-through target.
+func seedDemoAnomalies() {
+	var count int64
+	db.Model(&Anomaly{}).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	var demoUser User
+	if err := db.Where("email = ?", "demo@startrack.app").First(&demoUser).Error; err != nil {
+		return
+	}
+
+	var checkins []CheckIn
+	db.Preload("Restaurant").Where("user_id = ?", demoUser.ID).Order("created_at asc").Find(&checkins)
+	if len(checkins) < 3 {
+		return
+	}
+
+	var devices []NFCDevice
+	db.Order("id asc").Find(&devices)
+	if len(devices) == 0 {
+		return
+	}
+	deviceByRestaurant := make(map[uint]NFCDevice, len(devices))
+	for _, d := range devices {
+		deviceByRestaurant[d.RestaurantID] = d
+	}
+
+	uid := demoUser.ID
+	now := time.Now()
+	anomalies := []Anomaly{}
+
+	// High/open: velocity anomaly between two checkins that are geographically
+	// far apart but close in the seeded timeline, mirroring detectVelocityAnomaly.
+	prior, current := checkins[0], checkins[1]
+	rid := current.RestaurantID
+	cid := current.ID
+	distance := haversineDistance(current.Restaurant.LocationLat, current.Restaurant.LocationLong, prior.Restaurant.LocationLat, prior.Restaurant.LocationLong)
+	anomalies = append(anomalies, Anomaly{
+		UserID: &uid, RestaurantID: &rid, CheckInID: &cid,
+		Description: fmt.Sprintf("Rapid check-ins %.0f km apart within %d minutes: %q then %q", distance, int(velocityWindow.Minutes()), prior.Restaurant.Name, current.Restaurant.Name),
+		Severity:  "high",
+		Status:    "open",
+		CreatedAt: now.Add(-6 * time.Hour),
+	})
+
+	// Medium/open: repeated failed signatures against one NFC tag, tied to a
+	// later checkin at the same restaurant so "revoke checkin" has a target.
+	failCheckin := checkins[2]
+	failCid := failCheckin.ID
+	anomaly := Anomaly{
+		UserID: &uid, CheckInID: &failCid,
+		Description: fmt.Sprintf("Repeated failed check-in signatures from one device (%d attempts in the last hour)", failureThreshold+1),
+		Severity:    "medium",
+		Status:      "open",
+		CreatedAt:   now.Add(-26 * time.Hour),
+	}
+	if failDevice, ok := deviceByRestaurant[failCheckin.RestaurantID]; ok {
+		anomaly.DeviceID = &failDevice.ID
+	}
+	anomalies = append(anomalies, anomaly)
+
+	// Low/dismissed: a minor geofence miss that was reviewed and cleared.
+	geoCheckin := checkins[0]
+	geoRid := geoCheckin.RestaurantID
+	geoCid := geoCheckin.ID
+	anomalies = append(anomalies, Anomaly{
+		UserID: &uid, RestaurantID: &geoRid, CheckInID: &geoCid,
+		Description: "Check-in location ~340m outside registered geofence",
+		Severity:    "low",
+		Status:      "dismissed",
+		CreatedAt:   now.Add(-5 * 24 * time.Hour),
+	})
+
+	// High/confirmed: a tag flagged for cloning and already disabled.
+	tamperedDevice := devices[len(devices)-1]
+	anomalies = append(anomalies, Anomaly{
+		DeviceID:    &tamperedDevice.ID,
+		Description: fmt.Sprintf("NFC tag %s reported signature mismatches consistent with a cloned tag", tamperedDevice.TagID),
+		Severity:    "high",
+		Status:      "confirmed",
+		CreatedAt:   now.Add(-9 * 24 * time.Hour),
+	})
+
+	db.Create(&anomalies)
 }
