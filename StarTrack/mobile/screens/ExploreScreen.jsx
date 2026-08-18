@@ -232,7 +232,6 @@ export default function ExploreScreen({
                 <Badge key={opt.key} label={opt.label} active={sortBy === opt.key} onPress={() => setSortBy(opt.key)} />
               ))}
             </ScrollView>
-            <Text style={[styles.sectionHeading, { fontSize: 11, marginBottom: 8 }]}>Culinary Style</Text>
             <Dropdown
               label="Culinary Style"
               value={activeFilter.cuisine}
