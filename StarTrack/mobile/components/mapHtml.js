@@ -85,6 +85,7 @@ export function buildMapHtml(restaurants, selectedRestaurant) {
         });
       },
     });
+    var selectedMarker = null;
 
     points.forEach(function (p) {
       var icon = L.divIcon({
@@ -99,12 +100,23 @@ export function buildMapHtml(restaurants, selectedRestaurant) {
         '<div class="popup-meta">' + p.city + ' · ' + (p.cuisine || '') + ' · ' + '★'.repeat(p.stars) + '</div>'
       );
       marker.on('click', function () { notifyParent(p.id); });
+      if (p.id === selectedId) selectedMarker = marker;
       clusterGroup.addLayer(marker);
     });
 
     map.addLayer(clusterGroup);
 
-    if (points.length > 0) {
+    if (selectedId !== null) {
+      var selectedPoint = points.find(function (p) { return p.id === selectedId; });
+      if (selectedPoint) {
+        // Selecting another nearby restaurant should not reset the map to the
+        // full-world bounds. Keep the user in the local area instead.
+        // Zoom past the clustering threshold so nearby restaurants remain
+        // individually tappable after selecting one of them.
+        map.setView([selectedPoint.lat, selectedPoint.lng], 16);
+        if (selectedMarker) selectedMarker.openPopup();
+      }
+    } else if (points.length > 0) {
       var bounds = L.latLngBounds(points.map(function (p) { return [p.lat, p.lng]; }));
       map.fitBounds(bounds, { padding: [32, 32], maxZoom: 12 });
     } else {

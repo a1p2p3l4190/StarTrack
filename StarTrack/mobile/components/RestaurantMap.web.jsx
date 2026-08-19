@@ -19,7 +19,7 @@ export default function RestaurantMap({ restaurants, selectedRestaurant, onSelec
 
   return (
     <View style={{ flex: 1 }}>
-      <iframe title="restaurant-map" srcDoc={html} style={{ border: 0, width: '100%', height: '100%' }} />
+      <iframe title="restaurant-map" srcDoc={html} style={{ border: 0, width: '100%', height: '100%', touchAction: 'none' }} />
     </View>
   );
 }

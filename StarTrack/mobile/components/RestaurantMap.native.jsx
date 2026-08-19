@@ -10,6 +10,10 @@ export default function RestaurantMap({ restaurants, selectedRestaurant, onSelec
       originWhitelist={['*']}
       source={{ html }}
       style={{ flex: 1, backgroundColor: 'transparent' }}
+      scrollEnabled={false}
+      nestedScrollEnabled={false}
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
       onMessage={(event) => {
         const id = Number(event.nativeEvent.data);
         const restaurant = restaurants.find((r) => r.id === id);
