@@ -6,6 +6,7 @@ import { STARS_LEVELS, RATING_LEVELS, SORT_OPTIONS } from '../constants';
 import { deriveFilterOptions, isRestaurantOpen } from '../utils';
 import Badge from '../components/Badge';
 import Dropdown from '../components/Dropdown';
+import AppIcon from '../components/AppIcon';
 import RestaurantMap from '../components/RestaurantMap';
 import RestaurantListSkeleton from '../components/Shimmer';
 import { EmptyState } from '../components/ErrorDisplay';
@@ -61,7 +62,9 @@ export default function ExploreScreen({
       </View>
 
       <View style={styles.searchBarContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <View style={{ marginRight: 8 }}>
+          <AppIcon name="search" size={18} color="#d2a14c" />
+        </View>
         <TextInput
           style={styles.searchTextInput}
           placeholder="Search establishment name directly..."
@@ -74,7 +77,10 @@ export default function ExploreScreen({
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Text style={[styles.sectionHeading, { marginBottom: 0 }]}>Primary Curations</Text>
         <Pressable onPress={() => setDrawerVisible(true)}>
-          <Text style={{ color: '#d2a14c', fontSize: 13, fontWeight: '700' }}>⚡ More Filters</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <AppIcon name="filter" size={16} color="#d2a14c" />
+            <Text style={{ color: '#d2a14c', fontSize: 13, fontWeight: '700' }}>More Filters</Text>
+          </View>
         </Pressable>
       </View>
 

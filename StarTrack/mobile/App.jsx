@@ -12,6 +12,7 @@ import { styles } from './styles';
 import { computeBillDetails, filterRestaurants, sortRestaurants, computeCuisineBreakdown, computeStarBreakdown, mapCheckinMessage, distanceBetweenKm, summarizeTodayHours } from './utils';
 import { initializePushNotifications, onNotificationReceived, onNotificationTapped } from './notificationService';
 import CheckinResultModal from './components/CheckinResultModal';
+import AppIcon from './components/AppIcon';
 
 const CHECKIN_RADIUS_KM = 0.2;
 
@@ -508,8 +509,16 @@ export default function App() {
 
       <View style={[styles.hero, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
         <Text style={styles.title}>StarTrack</Text>
-        <Pressable onPress={openNotifications} hitSlop={10} style={{ padding: 6 }}>
-          <Text style={{ color: '#f8f1e6', fontSize: 23 }}>🔔</Text>
+        <Pressable onPress={openNotifications} hitSlop={10} style={{ padding: 7 }}>
+          <View style={{ width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ position: 'absolute', opacity: 0.22, transform: [{ scale: 1.55 }] }}>
+              <AppIcon name="bell" size={22} color="#d2a14c" strokeWidth={3} />
+            </View>
+            <View style={{ position: 'absolute', opacity: 0.55, transform: [{ scale: 1.3 }] }}>
+              <AppIcon name="bell" size={22} color="#d2a14c" strokeWidth={2.6} />
+            </View>
+            <AppIcon name="bell" size={22} color="#f1c86b" strokeWidth={2} />
+          </View>
           {unreadCount > 0 && (
             <View style={{ position: 'absolute', right: 0, top: 0, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: '#d2a14c', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
               <Text style={{ color: '#09090d', fontSize: 9, fontWeight: '800' }}>{Math.min(unreadCount, 9)}</Text>
@@ -615,7 +624,7 @@ export default function App() {
           {scanning ? (
             <ActivityIndicator color="#09090d" style={{ marginRight: 6 }} />
           ) : (
-            <Text style={styles.floatingNfcIcon}>📡</Text>
+            <AppIcon name="nfc" size={21} color="#09090d" />
           )}
           <Text style={styles.floatingNfcText}>
             {scanning ? 'Checking in...' : !Number.isFinite(selectedRestaurant.distance_km) ? 'Location needed to check in' : selectedRestaurant.distance_km > CHECKIN_RADIUS_KM ? `Arrive within 200 m · ${selectedRestaurant.distance_km.toFixed(1)} km away` : `Check in at ${selectedRestaurant.name}`}
@@ -624,11 +633,11 @@ export default function App() {
       )}
 
       <View style={styles.tabBar}>
-        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('explore')}><Text style={[styles.tabLabel, currentTab === 'explore' && styles.tabLabelActive]}>🗺️ Explore</Text></Pressable>
-        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('passport')}><Text style={[styles.tabLabel, currentTab === 'passport' && styles.tabLabelActive]}>🏆 Passport</Text></Pressable>
-        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('tools')}><Text style={[styles.tabLabel, currentTab === 'tools' && styles.tabLabelActive]}>🧮 Tools</Text></Pressable>
+        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('explore')}><AppIcon name="explore" size={20} color={currentTab === 'explore' ? '#d2a14c' : '#8e8982'} /><Text style={[styles.tabLabel, currentTab === 'explore' && styles.tabLabelActive]}>Explore</Text></Pressable>
+        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('passport')}><AppIcon name="passport" size={20} color={currentTab === 'passport' ? '#d2a14c' : '#8e8982'} /><Text style={[styles.tabLabel, currentTab === 'passport' && styles.tabLabelActive]}>Passport</Text></Pressable>
+        <Pressable style={styles.tabItem} onPress={() => setCurrentTab('tools')}><AppIcon name="tools" size={20} color={currentTab === 'tools' ? '#d2a14c' : '#8e8982'} /><Text style={[styles.tabLabel, currentTab === 'tools' && styles.tabLabelActive]}>Tools</Text></Pressable>
         <Pressable style={styles.tabItem} onPress={() => setCurrentTab('profile')}>
-          <Text style={[styles.tabLabel, currentTab === 'profile' && styles.tabLabelActive]}>👤 Profile</Text>
+          <AppIcon name="profile" size={20} color={currentTab === 'profile' ? '#d2a14c' : '#8e8982'} /><Text style={[styles.tabLabel, currentTab === 'profile' && styles.tabLabelActive]}>Profile</Text>
         </Pressable>
       </View>
     </View>
