@@ -1185,6 +1185,7 @@ export default function App() {
               <table>
                 <thead>
                   <tr>
+                    <th>ID</th>
                     <SortableTh label="Name" sortKey="name" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
                     <SortableTh label="Stars" sortKey="stars" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
                     <SortableTh label="Price" sortKey="price_tier" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
@@ -1198,10 +1199,11 @@ export default function App() {
                 </thead>
                 <tbody>
                   {restaurantTableRows.length === 0 && (
-                    <tr><td colSpan={9} style={{ opacity: 0.6 }}>No restaurants found.</td></tr>
+                    <tr><td colSpan={10} style={{ opacity: 0.6 }}>No restaurants found.</td></tr>
                   )}
                   {restaurantTableRows.map((item) => (
                     <tr key={item.id}>
+                      <td>{item.id}</td>
                       <td>{item.name}</td>
                       <td>{item.stars}</td>
                       <td>{item.price_tier ? '💰'.repeat(item.price_tier) : '—'}</td>
@@ -1851,6 +1853,7 @@ export default function App() {
                 <thead>
                   <tr>
                     <th><input type="checkbox" aria-label="Select all visible users" checked={users.length > 0 && users.every((u) => selectedUserIds.has(u.id))} onChange={(e) => setSelectedUserIds((prev) => { const next = new Set(prev); users.forEach((u) => e.target.checked ? next.add(u.id) : next.delete(u.id)); return next })} /></th>
+                    <th>ID</th>
                     <SortableTh label="Name" sortKey="display_name" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
                     <SortableTh label="Email" sortKey="email" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
                     <th>Role</th>
@@ -1861,10 +1864,11 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.length === 0 && <tr><td colSpan={8} style={{ opacity: 0.6 }}>No users found.</td></tr>}
+                  {users.length === 0 && <tr><td colSpan={9} style={{ opacity: 0.6 }}>No users found.</td></tr>}
                   {users.map((u) => (
                     <tr key={u.id}>
                       <td><input type="checkbox" aria-label={`Select ${u.display_name}`} checked={selectedUserIds.has(u.id)} onChange={(e) => setSelectedUserIds((prev) => { const next = new Set(prev); e.target.checked ? next.add(u.id) : next.delete(u.id); return next })} /></td>
+                      <td>{u.id}</td>
                       <td>{u.display_name}</td>
                       <td>{u.email}</td>
                       <td>{u.role}</td>
