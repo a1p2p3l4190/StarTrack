@@ -103,14 +103,20 @@ export const api = {
   disableAnomalyDevice: (id) => request(`/anomalies/${id}/disable-device`, { method: 'POST', auth: true }),
   banAnomalyUser: (id) => request(`/anomalies/${id}/ban-user`, { method: 'POST', auth: true }),
 
-  users: (search = '') => request(`/users${search ? `?search=${encodeURIComponent(search)}` : ''}`, { auth: true }),
+  users: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/users${qs ? `?${qs}` : ''}`, { auth: true })
+  },
   userHistory: (id) => request(`/users/${id}/history`, { auth: true }),
   banUser: (id) => request(`/users/${id}/ban`, { method: 'POST', auth: true }),
   unbanUser: (id) => request(`/users/${id}/unban`, { method: 'POST', auth: true }),
   manualVerify: (payload) => request('/checkins/manual-verify', { method: 'POST', body: payload, auth: true }),
 
   adminStats: () => request('/admin/stats', { auth: true }),
-  auditLogs: () => request('/audit-logs', { auth: true }),
+  auditLogs: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/audit-logs${qs ? `?${qs}` : ''}`, { auth: true })
+  },
   reports: () => request('/reports', { auth: true }),
   resolveReport: (id, payload) => request(`/reports/${id}/resolve`, { method: 'PATCH', body: payload, auth: true }),
 

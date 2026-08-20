@@ -109,6 +109,24 @@ function SkeletonStack({ count = 4, height = 40, style }) {
   )
 }
 
+// Clickable <th> for tables with sortable columns. `sort` is {key, dir};
+// clicking the active column flips direction, clicking a new one starts asc.
+function SortableTh({ label, sortKey, sort, onSort }) {
+  const active = sort.key === sortKey
+  return (
+    <th aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="sort-th" onClick={() => onSort(sortKey)}>
+        {label}{active && <span aria-hidden="true">{sort.dir === 'asc' ? ' ▲' : ' ▼'}</span>}
+      </button>
+    </th>
+  )
+}
+
+function toggleSort(current, key) {
+  if (current.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' }
+  return { key, dir: 'asc' }
+}
+
 function StatusBadge({ active, activeLabel, inactiveLabel }) {
   return (
     <span className={active ? 'status-badge status-active' : 'status-badge status-disabled'}>
@@ -244,6 +262,9 @@ function LoginPanel({ onAuthenticated }) {
 }
 
 const RESTAURANT_PAGE_SIZE = 10
+const USER_PAGE_SIZE = 20
+const DEVICE_PAGE_SIZE = 20
+const AUDIT_PAGE_SIZE = 20
 const EMPTY_RESTAURANT_FORM = { name: '', city: '', cuisine: '', stars: 1, year_awarded: 2026, reservation_release_day: 0, price_tier: 0, reservation_platform: '', reservation_url: '', photo_url: '' }
 const RESERVATION_PLATFORMS = [
   { value: '', label: 'None' },
@@ -299,6 +320,7 @@ export default function App() {
   const [restaurantTableTotal, setRestaurantTableTotal] = useState(0)
   const [restaurantSearch, setRestaurantSearch] = useState('')
   const [restaurantPage, setRestaurantPage] = useState(1)
+  const [restaurantSort, setRestaurantSort] = useState({ key: 'stars', dir: 'desc' })
   const [editingRestaurantId, setEditingRestaurantId] = useState(null)
   const [restaurantForm, setRestaurantForm] = useState(EMPTY_RESTAURANT_FORM)
   const [starHistoryForm, setStarHistoryForm] = useState([])
@@ -321,11 +343,28 @@ export default function App() {
   const [revealSalts, setRevealSalts] = useState(false)
   const [reassigningDeviceId, setReassigningDeviceId] = useState(null)
   const [reassignRestaurantId, setReassignRestaurantId] = useState(null)
+  // Devices table's own search/sort/pagination — layered client-side on top
+  // of the full `devices` list, which other features (tag-ID generation,
+  // CSV export, the dashboard's disabled-device count, global search) all
+  // still need in full.
+  const [deviceSearch, setDeviceSearch] = useState('')
+  const [devicePage, setDevicePage] = useState(1)
+  const [deviceSort, setDeviceSort] = useState({ key: 'created_at', dir: 'desc' })
 
   const [userSearch, setUserSearch] = useState('')
+  const [userPage, setUserPage] = useState(1)
+  const [userSort, setUserSort] = useState({ key: 'created_at', dir: 'desc' })
+  const [usersTotal, setUsersTotal] = useState(0)
+  // Separate from the Users tab's own paginated `users` list — the global
+  // search bar needs to match across every user, not just the current page.
+  const [globalUserMatches, setGlobalUserMatches] = useState([])
   const [selectedUserId, setSelectedUserId] = useState(null)
   const [selectedUserHistory, setSelectedUserHistory] = useState(null)
   const [manualVerifyForm, setManualVerifyForm] = useState({ restaurant_id: null, note: '' })
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
+  const [auditSort, setAuditSort] = useState({ key: 'created_at', dir: 'desc' })
+  const [auditLogsTotal, setAuditLogsTotal] = useState(0)
   const restaurantFormInitialRef = useRef(JSON.stringify(EMPTY_RESTAURANT_FORM))
 
   useEffect(() => {
@@ -350,7 +389,6 @@ export default function App() {
     fetchCities()
     fetchCuisines()
     fetchStats()
-    fetchAuditLogs()
     fetchReports()
   }, [currentAdmin])
 
@@ -365,14 +403,44 @@ export default function App() {
     const t = setTimeout(() => fetchRestaurantTable(), 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentAdmin, restaurantSearch, restaurantPage])
+  }, [currentAdmin, restaurantSearch, restaurantPage, restaurantSort])
 
   useEffect(() => {
     if (!currentAdmin) return
     const t = setTimeout(() => fetchUsers(), 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentAdmin, userSearch])
+  }, [currentAdmin, userSearch, userPage, userSort])
+
+  // Selection is page-scoped (bulkBanUsers only acts on rows in the
+  // currently loaded page), so clear it whenever the page/search/sort
+  // changes underneath it rather than leaving stale, invisible selections.
+  useEffect(() => {
+    setSelectedUserIds(new Set())
+  }, [userPage, userSearch, userSort])
+
+  useEffect(() => {
+    if (!currentAdmin) return
+    const t = setTimeout(() => fetchAuditLogs(), 250)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAdmin, auditSearch, auditPage, auditSort])
+
+  // Global search bar needs to match users beyond whatever page the Users
+  // tab happens to have loaded, so it queries the backend directly instead
+  // of filtering the (now paginated) `users` state.
+  useEffect(() => {
+    if (!currentAdmin) return
+    const query = globalSearch.trim()
+    if (!query) {
+      setGlobalUserMatches([])
+      return
+    }
+    const t = setTimeout(() => {
+      api.users({ search: query, limit: 5 }).then((data) => setGlobalUserMatches(data.users || [])).catch(() => setGlobalUserMatches([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [currentAdmin, globalSearch])
 
   const restaurantFormDirty = editingRestaurantId !== null && JSON.stringify(restaurantForm) !== restaurantFormInitialRef.current
 
@@ -404,7 +472,7 @@ export default function App() {
 
   async function fetchRestaurantTable() {
     try {
-      const params = { limit: RESTAURANT_PAGE_SIZE, page: restaurantPage }
+      const params = { limit: RESTAURANT_PAGE_SIZE, page: restaurantPage, sort: restaurantSort.key, order: restaurantSort.dir }
       if (restaurantSearch) params.q = restaurantSearch
       const data = await api.restaurants(params)
       setRestaurantTableRows(data.restaurants || [])
@@ -452,8 +520,11 @@ export default function App() {
 
   async function fetchUsers() {
     try {
-      const data = await api.users(userSearch)
+      const params = { limit: USER_PAGE_SIZE, page: userPage, sort: userSort.key, order: userSort.dir }
+      if (userSearch) params.search = userSearch
+      const data = await api.users(params)
       setUsers(data.users || [])
+      setUsersTotal(data.total || 0)
     } catch (err) {
       toast.push('error', `Failed to load users: ${err.message}`)
     }
@@ -470,8 +541,11 @@ export default function App() {
 
   async function fetchAuditLogs() {
     try {
-      const data = await api.auditLogs()
+      const params = { limit: AUDIT_PAGE_SIZE, page: auditPage, sort: auditSort.key, order: auditSort.dir }
+      if (auditSearch) params.search = auditSearch
+      const data = await api.auditLogs(params)
       setAuditLogs(data.audit_logs || [])
+      setAuditLogsTotal(data.total || 0)
     } catch (err) {
       toast.push('error', `Failed to load audit log: ${err.message}`)
     }
@@ -521,15 +595,67 @@ export default function App() {
     [filteredRestaurants, deviceRestaurantId]
   )
 
+  const restaurantNameById = useMemo(() => {
+    const map = new Map()
+    restaurants.forEach((r) => map.set(r.id, r.name))
+    return map
+  }, [restaurants])
+
+  // Devices table's search/sort/pagination run entirely client-side over
+  // the full `devices` list (see the state comment above for why it isn't
+  // server-paginated).
+  const sortedFilteredDevices = useMemo(() => {
+    const query = deviceSearch.trim().toLowerCase()
+    let rows = devices
+    if (query) {
+      rows = rows.filter((d) => {
+        const restaurantName = restaurantNameById.get(d.restaurant_id) || ''
+        return d.tag_id.toLowerCase().includes(query) || restaurantName.toLowerCase().includes(query) || d.status.toLowerCase().includes(query)
+      })
+    }
+    const fieldFor = (d) => {
+      switch (deviceSort.key) {
+        case 'restaurant': return restaurantNameById.get(d.restaurant_id) || ''
+        case 'status': return d.status
+        case 'tag_id': return d.tag_id
+        default: return d.created_at
+      }
+    }
+    return [...rows].sort((a, b) => {
+      const av = fieldFor(a)
+      const bv = fieldFor(b)
+      if (av < bv) return deviceSort.dir === 'asc' ? -1 : 1
+      if (av > bv) return deviceSort.dir === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [devices, deviceSearch, deviceSort, restaurantNameById])
+
+  const deviceTotalPages = Math.max(1, Math.ceil(sortedFilteredDevices.length / DEVICE_PAGE_SIZE))
+  const pagedDevices = useMemo(
+    () => sortedFilteredDevices.slice((devicePage - 1) * DEVICE_PAGE_SIZE, devicePage * DEVICE_PAGE_SIZE),
+    [sortedFilteredDevices, devicePage]
+  )
+
+  useEffect(() => {
+    setDevicePage(1)
+  }, [deviceSearch, deviceSort])
+
+  // Devices table is client-paginated, so a shrinking result set (search,
+  // or a device getting deleted) can leave devicePage pointing past the
+  // last page — clamp it back instead of showing an empty table.
+  useEffect(() => {
+    setDevicePage((p) => Math.min(p, deviceTotalPages))
+  }, [deviceTotalPages])
+
   const globalResults = useMemo(() => {
     const query = globalSearch.trim().toLowerCase()
     if (!query) return []
     return [
       ...restaurants.filter((r) => `${r.name} ${r.city} ${r.country}`.toLowerCase().includes(query)).slice(0, 5).map((r) => ({ type: 'Restaurant', label: restaurantLabel(r), tab: 'restaurants', id: r.id })),
-      ...users.filter((u) => `${u.display_name} ${u.email}`.toLowerCase().includes(query)).slice(0, 5).map((u) => ({ type: 'User', label: `${u.display_name} — ${u.email}`, tab: 'users', id: u.id })),
+      ...globalUserMatches.slice(0, 5).map((u) => ({ type: 'User', label: `${u.display_name} — ${u.email}`, tab: 'users', id: u.id })),
       ...devices.filter((d) => (d.tag_id || '').toLowerCase().includes(query)).slice(0, 5).map((d) => ({ type: 'NFC Device', label: d.tag_id, tab: 'devices', id: d.id })),
     ].slice(0, 8)
-  }, [globalSearch, restaurants, users, devices])
+  }, [globalSearch, restaurants, globalUserMatches, devices])
 
   const reassignMatch = useMemo(
     () => restaurants.find((r) => r.id === reassignRestaurantId),
@@ -542,6 +668,8 @@ export default function App() {
   )
 
   const restaurantTotalPages = Math.max(1, Math.ceil(restaurantTableTotal / RESTAURANT_PAGE_SIZE))
+  const userTotalPages = Math.max(1, Math.ceil(usersTotal / USER_PAGE_SIZE))
+  const auditTotalPages = Math.max(1, Math.ceil(auditLogsTotal / AUDIT_PAGE_SIZE))
 
   async function startEditRestaurant(item) {
     setEditingRestaurantId(item.id)
@@ -578,7 +706,7 @@ export default function App() {
       const item = restaurants.find((r) => r.id === result.id)
       if (item) startEditRestaurant(item)
     } else if (result.type === 'User') {
-      const user = users.find((u) => u.id === result.id)
+      const user = globalUserMatches.find((u) => u.id === result.id)
       if (user) openUserHistory(user)
     } else if (result.type === 'NFC Device') {
       setDeviceRestaurantId(devices.find((d) => d.id === result.id)?.restaurant_id || null)
@@ -1057,13 +1185,13 @@ export default function App() {
               <table>
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Stars</th>
-                    <th>Price</th>
+                    <SortableTh label="Name" sortKey="name" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
+                    <SortableTh label="Stars" sortKey="stars" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
+                    <SortableTh label="Price" sortKey="price_tier" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
                     <th>Booking</th>
-                    <th>City</th>
-                    <th>Cuisine</th>
-                    <th>Year</th>
+                    <SortableTh label="City" sortKey="city" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
+                    <SortableTh label="Cuisine" sortKey="cuisine" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
+                    <SortableTh label="Year" sortKey="year_awarded" sort={restaurantSort} onSort={(key) => { setRestaurantSort((s) => toggleSort(s, key)); setRestaurantPage(1) }} />
                     <th>Next Release</th>
                     <th>Actions</th>
                   </tr>
@@ -1367,20 +1495,31 @@ export default function App() {
                 </button>
               </div>
             </div>
+            <label style={{ marginBottom: 16, display: 'block' }}>
+              Search
+              <input
+                value={deviceSearch}
+                onChange={(e) => setDeviceSearch(e.target.value)}
+                placeholder="Search by tag ID, restaurant, or status"
+              />
+            </label>
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Tag ID</th>
-                    <th>Restaurant</th>
+                    <SortableTh label="Tag ID" sortKey="tag_id" sort={deviceSort} onSort={(key) => setDeviceSort((s) => toggleSort(s, key))} />
+                    <SortableTh label="Restaurant" sortKey="restaurant" sort={deviceSort} onSort={(key) => setDeviceSort((s) => toggleSort(s, key))} />
                     <th>Salt</th>
-                    <th>Status</th>
-                    <th>Created</th>
+                    <SortableTh label="Status" sortKey="status" sort={deviceSort} onSort={(key) => setDeviceSort((s) => toggleSort(s, key))} />
+                    <SortableTh label="Created" sortKey="created_at" sort={deviceSort} onSort={(key) => setDeviceSort((s) => toggleSort(s, key))} />
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {devices.map((item) => {
+                  {pagedDevices.length === 0 && (
+                    <tr><td colSpan={6} style={{ opacity: 0.6 }}>No devices found.</td></tr>
+                  )}
+                  {pagedDevices.map((item) => {
                     const restaurant = restaurants.find((r) => r.id === item.restaurant_id)
                     const isReassigning = reassigningDeviceId === item.id
                     return (
@@ -1449,6 +1588,14 @@ export default function App() {
                   })}
                 </tbody>
               </table>
+            </div>
+            <div className="pagination-row">
+              <span>{sortedFilteredDevices.length} device{sortedFilteredDevices.length === 1 ? '' : 's'}</span>
+              <div className="pagination-buttons">
+                <button type="button" className="icon-btn" disabled={devicePage <= 1} onClick={() => setDevicePage((p) => p - 1)}>Prev</button>
+                <span>Page {devicePage} / {deviceTotalPages}</span>
+                <button type="button" className="icon-btn" disabled={devicePage >= deviceTotalPages} onClick={() => setDevicePage((p) => p + 1)}>Next</button>
+              </div>
             </div>
           </div>
           <div className="form-card">
@@ -1691,11 +1838,11 @@ export default function App() {
             </div>
             <label style={{ marginBottom: 16, display: 'block' }}>
               Search
-              <input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Search by email or name" />
+              <input value={userSearch} onChange={(e) => { setUserSearch(e.target.value); setUserPage(1) }} placeholder="Search by email or name" />
             </label>
             {selectedUserIds.size > 0 && (
               <div className="panel-header" style={{ marginBottom: 12 }}>
-                <span>{selectedUserIds.size} selected</span>
+                <span>{selectedUserIds.size} selected on this page</span>
                 <button type="button" className="icon-btn" onClick={bulkBanUsers}>Ban Selected Users</button>
               </div>
             )}
@@ -1704,11 +1851,11 @@ export default function App() {
                 <thead>
                   <tr>
                     <th><input type="checkbox" aria-label="Select all visible users" checked={users.length > 0 && users.every((u) => selectedUserIds.has(u.id))} onChange={(e) => setSelectedUserIds((prev) => { const next = new Set(prev); users.forEach((u) => e.target.checked ? next.add(u.id) : next.delete(u.id)); return next })} /></th>
-                    <th>Name</th>
-                    <th>Email</th>
+                    <SortableTh label="Name" sortKey="display_name" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
+                    <SortableTh label="Email" sortKey="email" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
                     <th>Role</th>
-                    <th>Region</th>
-                    <th>Score</th>
+                    <SortableTh label="Region" sortKey="region" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
+                    <SortableTh label="Score" sortKey="score" sort={userSort} onSort={(key) => { setUserSort((s) => toggleSort(s, key)); setUserPage(1) }} />
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -1741,6 +1888,14 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="pagination-row">
+              <span>{usersTotal} user{usersTotal === 1 ? '' : 's'}</span>
+              <div className="pagination-buttons">
+                <button type="button" className="icon-btn" disabled={userPage <= 1} onClick={() => setUserPage((p) => p - 1)}>Prev</button>
+                <span>Page {userPage} / {userTotalPages}</span>
+                <button type="button" className="icon-btn" disabled={userPage >= userTotalPages} onClick={() => setUserPage((p) => p + 1)}>Next</button>
+              </div>
             </div>
           </div>
 
@@ -1820,14 +1975,22 @@ export default function App() {
               <h3>Recent Activity</h3>
               <button type="button" className="pill" onClick={fetchAuditLogs} aria-label="Refresh audit log">🔄 Refresh</button>
             </div>
+            <label style={{ marginBottom: 16, display: 'block' }}>
+              Search
+              <input
+                value={auditSearch}
+                onChange={(e) => { setAuditSearch(e.target.value); setAuditPage(1) }}
+                placeholder="Search by admin, action, target type, or detail"
+              />
+            </label>
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Time</th>
-                    <th>Admin</th>
-                    <th>Action</th>
-                    <th>Target</th>
+                    <SortableTh label="Time" sortKey="created_at" sort={auditSort} onSort={(key) => { setAuditSort((s) => toggleSort(s, key)); setAuditPage(1) }} />
+                    <SortableTh label="Admin" sortKey="admin_email" sort={auditSort} onSort={(key) => { setAuditSort((s) => toggleSort(s, key)); setAuditPage(1) }} />
+                    <SortableTh label="Action" sortKey="action" sort={auditSort} onSort={(key) => { setAuditSort((s) => toggleSort(s, key)); setAuditPage(1) }} />
+                    <SortableTh label="Target" sortKey="target_type" sort={auditSort} onSort={(key) => { setAuditSort((s) => toggleSort(s, key)); setAuditPage(1) }} />
                     <th>Detail</th>
                     <th>IP</th>
                   </tr>
@@ -1848,6 +2011,14 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="pagination-row">
+              <span>{auditLogsTotal} event{auditLogsTotal === 1 ? '' : 's'}</span>
+              <div className="pagination-buttons">
+                <button type="button" className="icon-btn" disabled={auditPage <= 1} onClick={() => setAuditPage((p) => p - 1)}>Prev</button>
+                <span>Page {auditPage} / {auditTotalPages}</span>
+                <button type="button" className="icon-btn" disabled={auditPage >= auditTotalPages} onClick={() => setAuditPage((p) => p + 1)}>Next</button>
+              </div>
             </div>
           </div>
         </section>
