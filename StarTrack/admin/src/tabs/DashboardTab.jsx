@@ -26,6 +26,13 @@ export default function DashboardTab({ stats, onRefreshStats, reportsCount, disa
 
   const checkStatus = (check) => check?.status === 'healthy'
   const overallHealthy = health?.healthy === true
+  const alerts = []
+  if (health && !overallHealthy) alerts.push({ key: 'health', severity: 'critical', title: 'System health degraded', detail: health.error || 'Check API and database connectivity.', action: 'Check System Health', onClick: refreshHealth })
+  if (stats?.open_anomalies > 0) alerts.push({ key: 'anomalies', severity: 'critical', title: `${stats.open_anomalies} open security anomal${stats.open_anomalies === 1 ? 'y' : 'ies'}`, detail: 'Review suspicious check-in activity and take action.', action: 'Open Security', onClick: onOpenSecurity })
+  if (reportsCount > 0) alerts.push({ key: 'reports', severity: 'warning', title: `${reportsCount} pending review report${reportsCount === 1 ? '' : 's'}`, detail: 'User reports are waiting for moderation.', action: 'Review Reports', onClick: () => setTab('reports') })
+  if (disabledDeviceCount > 0) alerts.push({ key: 'devices', severity: 'warning', title: `${disabledDeviceCount} disabled NFC device${disabledDeviceCount === 1 ? '' : 's'}`, detail: 'Check whether these devices need replacement or reactivation.', action: 'Manage Devices', onClick: () => setTab('devices') })
+  const verificationRate = stats?.total_checkins > 0 ? (stats.verified_checkins / stats.total_checkins) * 100 : null
+  if (verificationRate !== null && stats.total_checkins >= 10 && verificationRate < 50) alerts.push({ key: 'verification-rate', severity: 'warning', title: 'Low check-in verification rate', detail: `${verificationRate.toFixed(1)}% of check-in attempts are verified. Investigate NFC or geofence failures.`, action: 'Open Security', onClick: onOpenSecurity })
   return (
     <>
       <section className="section-grid">
@@ -72,6 +79,30 @@ export default function DashboardTab({ stats, onRefreshStats, reportsCount, disa
           </div>
           {!healthLoading && !health?.healthy && <span className="field-error">{health.error || 'One or more system checks failed.'}</span>}
           {!healthLoading && health?.checked_at && <span className="field-hint" style={{ display: 'block', marginTop: 10 }}>Last checked {new Date(health.checked_at).toLocaleString()}</span>}
+        </div>
+        <div className="admin-panel wide-panel">
+          <div className="panel-header">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <h3>Attention Required</h3>
+              <span className="field-hint">Signals that may need an operations response</span>
+            </div>
+            <span className="field-hint">{alerts.length} active</span>
+          </div>
+          {alerts.length === 0 ? (
+            <div style={{ color: '#7ce8b4', padding: '10px 0', fontSize: 13 }}>✓ No important anomalies detected.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {alerts.map((alert) => (
+                <div key={alert.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '12px 14px', borderRadius: 12, border: `1px solid ${alert.severity === 'critical' ? 'rgba(255,133,133,0.35)' : 'rgba(232,178,61,0.35)'}`, background: alert.severity === 'critical' ? 'rgba(255,133,133,0.07)' : 'rgba(232,178,61,0.07)' }}>
+                  <div>
+                    <div style={{ color: alert.severity === 'critical' ? '#ff8585' : '#e8b23d', fontWeight: 700, fontSize: 13 }}>{alert.title}</div>
+                    <div className="field-hint" style={{ marginTop: 4 }}>{alert.detail}</div>
+                  </div>
+                  <button type="button" className="pill" onClick={alert.onClick}>{alert.action} →</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {!stats && (
           <>
