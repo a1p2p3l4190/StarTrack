@@ -193,9 +193,12 @@ export default function UsersTab({ restaurants, toast, guard, onStatsChanged, fo
       </div>
 
       {selectedUserId && (
-        <div className="admin-panel wide-panel">
+        <>
+          <div onClick={() => setSelectedUserId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.48)', zIndex: 20 }} />
+          <div className="admin-panel" style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(560px, 92vw)', maxWidth: '100%', overflowY: 'auto', zIndex: 21, borderRadius: 0, padding: 24, boxShadow: '-12px 0 30px rgba(0,0,0,0.35)' }}>
           <div className="panel-header">
-            <h3>Check-in History{selectedUserHistory ? ` — ${selectedUserHistory.user.display_name}` : ''}</h3>
+            <h3>Member Details{selectedUserHistory ? ` — ${selectedUserHistory.user.display_name}` : ''}</h3>
+            <button type="button" className="icon-btn" onClick={() => setSelectedUserId(null)}>Close</button>
           </div>
           {!selectedUserHistory && <SkeletonStack count={4} height={44} />}
           {selectedUserHistory && (
@@ -252,7 +255,8 @@ export default function UsersTab({ restaurants, toast, guard, onStatsChanged, fo
               </button>
             </form>
           </div>
-        </div>
+          </div>
+        </>
       )}
     </section>
   )
