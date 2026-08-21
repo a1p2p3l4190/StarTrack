@@ -33,12 +33,17 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
   const [savingFavorite, setSavingFavorite] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [toastMessage, setToastMessage] = useState({ text: '', type: 'info' });
+  const [hoursExpanded, setHoursExpanded] = useState(false);
 
   // The Explore list's restaurant objects don't carry star_history/hours
   // (kept out of the list payload on purpose — only fetched here on the
   // detail screen where they're actually shown).
   const [starHistory, setStarHistory] = useState(restaurant.star_history || []);
   const [hours, setHours] = useState(restaurant.hours || []);
+
+  const todayDayOfWeek = new Date().getDay();
+  const todayHours = hours.find((h) => h.day_of_week === todayDayOfWeek);
+  const currentlyOpen = isRestaurantOpen({ ...restaurant, hours });
 
   useEffect(() => {
     let cancelled = false;
@@ -287,27 +292,31 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
           <Text style={{ color: '#f8f0e9', fontSize: 12, fontWeight: '700' }}>{restaurant.price_tier ? '💰'.repeat(restaurant.price_tier) : 'Price unavailable'}</Text>
         </View>
 
-        <View style={[styles.splitterCard, { padding: 16, marginBottom: 16 }]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <Text style={[styles.sectionHeading, { marginBottom: 0 }]}>Opening Hours</Text>
-            <Text style={{ color: isRestaurantOpen(restaurant) ? '#7ce8b4' : '#e8b23d', fontSize: 11, fontWeight: '800' }}>
-              {isRestaurantOpen(restaurant) ? '● Open now' : '● Closed'}
-            </Text>
-          </View>
-          <Text style={{ color: '#6e6b64', fontSize: 11, marginBottom: 12 }}>
-            Hours provided by the restaurant
-          </Text>
-          {WEEK_DAYS.map((day, index) => {
-            const dayOfWeek = (index + 1) % 7;
-            const isToday = new Date().getDay() === dayOfWeek;
-            const entry = hours.find((h) => h.day_of_week === dayOfWeek);
-            return (
-              <View key={day} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: '#22252c' }}>
-                <Text style={{ color: isToday ? '#d2a14c' : '#c4b9a8', fontSize: 12, fontWeight: isToday ? '800' : '500' }}>{day}{isToday ? ' · Today' : ''}</Text>
-                <Text style={{ color: isToday ? '#f8f1e6' : '#8e8982', fontSize: 12 }}>{entry ? formatHoursEntry(entry) : 'Hours unavailable'}</Text>
-              </View>
-            );
-          })}
+        <View style={[styles.splitterCard, { padding: 0, marginBottom: 16, overflow: 'hidden' }]}>
+          <Pressable onPress={() => setHoursExpanded((expanded) => !expanded)} style={{ padding: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: currentlyOpen ? '#18c89a' : '#ff6b6b', marginRight: 12, shadowColor: currentlyOpen ? '#18c89a' : '#ff6b6b', shadowOpacity: 0.6, shadowRadius: 5 }} />
+              <Text style={{ color: currentlyOpen ? '#7ce8b4' : '#ff8585', fontSize: 16, fontWeight: '800' }}>{currentlyOpen ? 'Open now' : 'Closed'}</Text>
+              <Text numberOfLines={1} style={{ color: '#8e8982', fontSize: 14, marginLeft: 12, flex: 1 }}>{todayHours ? formatHoursEntry(todayHours) : 'Hours unavailable'}</Text>
+              <Text style={{ color: '#f3e8d8', fontSize: 24, lineHeight: 22 }}>{hoursExpanded ? '⌃' : '⌄'}</Text>
+            </View>
+          </Pressable>
+          {hoursExpanded && (
+            <View style={{ borderTopWidth: 1, borderTopColor: '#292c34', paddingHorizontal: 16, paddingBottom: 10 }}>
+              {WEEK_DAYS.map((day, index) => {
+                const dayOfWeek = (index + 1) % 7;
+                const isToday = todayDayOfWeek === dayOfWeek;
+                const entry = hours.find((h) => h.day_of_week === dayOfWeek);
+                return (
+                  <View key={day} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#22252c' }}>
+                    <Text style={{ color: isToday ? '#d2a14c' : '#c4b9a8', fontSize: 13, fontWeight: isToday ? '800' : '500' }}>{day}{isToday ? ' · Today' : ''}</Text>
+                    <Text style={{ color: isToday ? '#f8f1e6' : '#8e8982', fontSize: 13 }}>{entry ? formatHoursEntry(entry) : 'Hours unavailable'}</Text>
+                  </View>
+                );
+              })}
+              <Text style={{ color: '#6e6b64', fontSize: 11, marginTop: 12 }}>Hours provided by the restaurant.</Text>
+            </View>
+          )}
         </View>
 
         {starHistory.length > 0 ? (
