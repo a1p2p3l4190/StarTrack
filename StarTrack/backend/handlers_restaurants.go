@@ -147,9 +147,31 @@ func caseInsensitiveContains(column, value string) (string, string) {
 	return "LOWER(" + column + ") LIKE ?", "%" + strings.ToLower(value) + "%"
 }
 
+// restaurantSortColumns whitelists which columns the admin portal's
+// Restaurant Engine table may sort by — never interpolate c.Query("sort")
+// directly into SQL. Public callers (mobile/web) never pass "sort", so they
+// keep the default stars/year ordering below unaffected.
+var restaurantSortColumns = map[string]string{
+	"name":         "name",
+	"stars":        "stars",
+	"price_tier":   "price_tier",
+	"city":         "city",
+	"cuisine":      "cuisine",
+	"year_awarded": "year_awarded",
+}
+
 func listRestaurantsHandler(c *gin.Context) {
 	var restaurants []Restaurant
-	query := db.Order("stars desc, year_awarded desc")
+	var query *gorm.DB
+	if column, ok := restaurantSortColumns[c.Query("sort")]; ok {
+		direction := "desc"
+		if c.Query("order") == "asc" {
+			direction = "asc"
+		}
+		query = db.Order(column + " " + direction)
+	} else {
+		query = db.Order("stars desc, year_awarded desc")
+	}
 
 	if year := c.Query("year"); year != "" {
 		if num, err := strconv.Atoi(year); err == nil {

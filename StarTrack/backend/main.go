@@ -177,7 +177,26 @@ func setupRouter(cfg *Config) *gin.Engine {
 }
 
 func healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"healthy": true})
+	started := time.Now()
+	status := http.StatusOK
+	database := gin.H{"status": "healthy"}
+	if sqlDB, err := db.DB(); err != nil {
+		status = http.StatusServiceUnavailable
+		database = gin.H{"status": "unhealthy", "error": "database handle unavailable"}
+	} else if err := sqlDB.PingContext(c.Request.Context()); err != nil {
+		status = http.StatusServiceUnavailable
+		database = gin.H{"status": "unhealthy", "error": "database ping failed"}
+	}
+
+	c.JSON(status, gin.H{
+		"healthy": status == http.StatusOK,
+		"checks": gin.H{
+			"api":      gin.H{"status": "healthy"},
+			"database": database,
+		},
+		"latency_ms": time.Since(started).Milliseconds(),
+		"checked_at": time.Now().UTC(),
+	})
 }
 
 func listNotificationsHandler(c *gin.Context) {

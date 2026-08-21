@@ -1,7 +1,31 @@
+import { useCallback, useEffect, useState } from 'react'
 import ErrorBoundary from '../ErrorBoundary'
 import { CheckinTrendChart, CityBreakdownChart } from '../DashboardCharts'
+import { api } from '../api'
 
 export default function DashboardTab({ stats, onRefreshStats, reportsCount, disabledDeviceCount, setTab, onOpenSecurity }) {
+  const [health, setHealth] = useState(null)
+  const [healthLoading, setHealthLoading] = useState(true)
+
+  const refreshHealth = useCallback(async () => {
+    setHealthLoading(true)
+    try {
+      setHealth(await api.health())
+    } catch (error) {
+      setHealth({ healthy: false, error: error.message })
+    } finally {
+      setHealthLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshHealth()
+    const intervalId = window.setInterval(refreshHealth, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [refreshHealth])
+
+  const checkStatus = (check) => check?.status === 'healthy'
+  const overallHealthy = health?.healthy === true
   return (
     <>
       <section className="section-grid">
@@ -11,6 +35,43 @@ export default function DashboardTab({ stats, onRefreshStats, reportsCount, disa
             <button type="button" className="pill" onClick={onRefreshStats} aria-label="Refresh dashboard statistics">🔄 Refresh Data</button>
           </div>
           <p>System-wide totals across check-ins, members, and fraud signals.</p>
+        </div>
+        <div className="admin-panel wide-panel">
+          <div className="panel-header">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <h3>System Health</h3>
+              <span className="field-hint">Live connectivity checks for core services</span>
+            </div>
+            <button type="button" className="pill" onClick={refreshHealth} disabled={healthLoading}>
+              {healthLoading ? 'Checking…' : '↻ Check Now'}
+            </button>
+          </div>
+          <div className="stat-grid">
+            <div className="stat-tile">
+              <span className="stat-label">Overall</span>
+              <span className="stat-value" style={{ color: healthLoading ? undefined : overallHealthy ? '#7ce8b4' : '#ff8585' }}>
+                {healthLoading ? 'Checking…' : overallHealthy ? 'Healthy' : 'Degraded'}
+              </span>
+            </div>
+            <div className="stat-tile">
+              <span className="stat-label">API</span>
+              <span className="stat-value" style={{ color: checkStatus(health?.checks?.api) ? '#7ce8b4' : '#ff8585' }}>
+                {healthLoading ? '—' : checkStatus(health?.checks?.api) ? 'Healthy' : 'Down'}
+              </span>
+            </div>
+            <div className="stat-tile">
+              <span className="stat-label">Database</span>
+              <span className="stat-value" style={{ color: checkStatus(health?.checks?.database) ? '#7ce8b4' : '#ff8585' }}>
+                {healthLoading ? '—' : checkStatus(health?.checks?.database) ? 'Healthy' : 'Down'}
+              </span>
+            </div>
+            <div className="stat-tile">
+              <span className="stat-label">Response</span>
+              <span className="stat-value">{healthLoading ? '—' : `${health?.latency_ms ?? '—'} ms`}</span>
+            </div>
+          </div>
+          {!healthLoading && !health?.healthy && <span className="field-error">{health.error || 'One or more system checks failed.'}</span>}
+          {!healthLoading && health?.checked_at && <span className="field-hint" style={{ display: 'block', marginTop: 10 }}>Last checked {new Date(health.checked_at).toLocaleString()}</span>}
         </div>
         {!stats && (
           <>

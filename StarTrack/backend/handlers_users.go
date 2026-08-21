@@ -3,23 +3,67 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
+// userSortColumns whitelists which columns the admin portal's Users table
+// may sort by — never interpolate c.Query("sort") directly into SQL.
+var userSortColumns = map[string]string{
+	"created_at":   "created_at",
+	"display_name": "display_name",
+	"email":        "email",
+	"score":        "score",
+	"region":       "region",
+}
+
 // listUsersHandler supports the admin portal's member lookup — search by
 // email or display name so support can find an account from a ticket.
+// Omitting "limit" returns the full unpaginated list, matching
+// listRestaurantsHandler's convention (other callers rely on the full set).
 func listUsersHandler(c *gin.Context) {
 	var users []User
-	query := db.Order("created_at desc")
+	query := db.Model(&User{})
 	if q := c.Query("search"); q != "" {
 		like := "%" + q + "%"
 		query = query.Where("LOWER(email) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?)", like, like)
 	}
-	query.Find(&users)
-	RespondSuccess(c, http.StatusOK, map[string]interface{}{"users": users})
+
+	column, ok := userSortColumns[c.Query("sort")]
+	if !ok {
+		column = "created_at"
+	}
+	direction := "desc"
+	if c.Query("order") == "asc" {
+		direction = "asc"
+	}
+	query = query.Order(column + " " + direction)
+
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		query.Find(&users)
+		RespondSuccess(c, http.StatusOK, map[string]interface{}{"users": users})
+		return
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+	page, err := strconv.Atoi(c.Query("page"))
+	if err != nil || page <= 0 {
+		page = 1
+	}
+
+	var total int64
+	query.Count(&total)
+	query.Offset((page - 1) * limit).Limit(limit).Find(&users)
+
+	meta := &Metadata{Pagination: &PaginationMeta{Page: page, Limit: limit, Total: int(total)}}
+	RespondSuccessWithMeta(c, http.StatusOK, map[string]interface{}{"users": users}, meta)
 }
 
 // getUserHistoryHandler is the admin equivalent of the mobile app's
