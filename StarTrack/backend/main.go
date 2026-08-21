@@ -36,6 +36,9 @@ func main() {
 	}
 
 	seedData()
+	if err := migrateRestaurantStarHistory(); err != nil {
+		panic(fmt.Errorf("failed to migrate restaurant star history: %w", err))
+	}
 
 	router := setupRouter(cfg)
 	router.Run(":" + cfg.Port)
@@ -94,6 +97,7 @@ func setupRouter(cfg *Config) *gin.Engine {
 		api.GET("/restaurants", listRestaurantsHandler)
 		api.GET("/restaurants/:id", getRestaurantHandler)
 		api.POST("/restaurants", auth, admin, createRestaurantHandler)
+		api.POST("/restaurants/import", auth, admin, importRestaurantsHandler)
 		api.PUT("/restaurants/:id", auth, admin, updateRestaurantHandler)
 		api.DELETE("/restaurants/:id", auth, admin, deleteRestaurantHandler)
 		api.PUT("/restaurants/:id/star-history", auth, admin, updateRestaurantStarHistoryHandler)

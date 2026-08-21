@@ -39,14 +39,21 @@ type Follow struct {
 }
 
 type Restaurant struct {
-	ID          uint   `gorm:"primaryKey" json:"id"`
-	Name        string `gorm:"size:255;not null" json:"name"`
-	Stars       int    `gorm:"not null" json:"stars"`
-	Country     string `gorm:"size:120;default:USA" json:"country"`
-	City        string `gorm:"size:128;not null" json:"city"`
-	Address     string `gorm:"size:512" json:"address"`
-	Cuisine     string `gorm:"size:128" json:"cuisine"`
-	YearAwarded int    `json:"year_awarded"`
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	Name    string `gorm:"size:255;not null" json:"name"`
+	Country string `gorm:"size:120;default:USA" json:"country"`
+	City    string `gorm:"size:128;not null" json:"city"`
+	Address string `gorm:"size:512" json:"address"`
+	Cuisine string `gorm:"size:128" json:"cuisine"`
+
+	// Stars/YearAwarded are computed fresh on every read from this
+	// restaurant's newest RestaurantStarHistory row (see
+	// hydrateCurrentStarSnapshots) — never stored, so they can't drift out
+	// of sync with the history table the way a denormalized column could.
+	// Writes go through RestaurantStarHistory (create/update a year's
+	// entry), never these fields directly.
+	Stars       int    `gorm:"-" json:"stars"`
+	YearAwarded int    `gorm:"-" json:"year_awarded"`
 	PhotoURL    string `gorm:"size:500" json:"photo_url"`
 	// PriceTier is a 1-3 scale (like Stars) — 💰/💰💰/💰💰💰 — rather than a
 	// free-text field, so it's actually comparable/sortable. 0 means unset.

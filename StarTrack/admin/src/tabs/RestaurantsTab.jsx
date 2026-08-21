@@ -35,6 +35,10 @@ export default function RestaurantsTab({ restaurants, cities, onCityCreated, cui
   const editingRestaurantRequestRef = useRef(null)
   const restaurantFormInitialRef = useRef(JSON.stringify(EMPTY_RESTAURANT_FORM))
 
+  const [importFile, setImportFile] = useState(null)
+  const [importResult, setImportResult] = useState(null)
+  const importFileInputRef = useRef(null)
+
   useEffect(() => {
     const t = setTimeout(() => fetchRestaurantTable(), 250)
     return () => clearTimeout(t)
@@ -156,6 +160,28 @@ export default function RestaurantsTab({ restaurants, cities, onCityCreated, cui
     })
   }
 
+  async function submitImport() {
+    if (!importFile) {
+      toast.push('error', 'Choose a CSV file first')
+      return
+    }
+    await guard.run('restaurant-import', async () => {
+      try {
+        const result = await api.importRestaurants(importFile)
+        setImportResult(result)
+        setImportFile(null)
+        if (importFileInputRef.current) importFileInputRef.current.value = ''
+        const createdCount = result.created?.length || 0
+        const skippedCount = result.skipped?.length || 0
+        const failedCount = result.failed?.length || 0
+        toast.push(failedCount ? 'error' : 'success', `${createdCount} created, ${skippedCount} skipped, ${failedCount} failed`)
+        if (createdCount > 0) refreshRestaurantViews()
+      } catch (err) {
+        toast.push('error', err.message)
+      }
+    })
+  }
+
   async function removeRestaurant(id) {
     if (!window.confirm('Delete this restaurant? This cannot be undone.')) return
     await guard.run(`restaurant-delete-${id}`, async () => {
@@ -175,6 +201,66 @@ export default function RestaurantsTab({ restaurants, cities, onCityCreated, cui
       <div className="panel-card">
         <h2>Michelin Metadata Engine</h2>
         <p>Update star tiers, city metadata, and annual award changes with confidence.</p>
+      </div>
+      <div className="admin-panel">
+        <div className="panel-header">
+          <h3>Bulk Import Restaurants</h3>
+        </div>
+        <p className="field-hint" style={{ display: 'block', marginBottom: 12 }}>
+          Upload a CSV to add many restaurants at once — e.g. a new Michelin Guide release. Required columns: <code>name</code>, <code>city</code>, <code>cuisine</code>, <code>stars</code>.
+          Optional: <code>country</code>, <code>address</code>, <code>year_awarded</code>, <code>price_tier</code>, <code>reservation_platform</code>, <code>reservation_url</code>, <code>reservation_release_day</code>, <code>photo_url</code>.
+          Rows matching an existing restaurant's name and city are skipped rather than duplicated.
+        </p>
+        <div className="combo-row">
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+          />
+          <button type="button" className="icon-btn" disabled={!importFile || guard.isPending('restaurant-import')} onClick={submitImport}>
+            {guard.isPending('restaurant-import') ? 'Importing…' : 'Import CSV'}
+          </button>
+        </div>
+        {importResult && (
+          <div style={{ marginTop: 16 }}>
+            <p className="field-hint" style={{ display: 'block', marginBottom: 8 }}>
+              {importResult.created?.length || 0} created, {importResult.skipped?.length || 0} skipped, {importResult.failed?.length || 0} failed
+            </p>
+            {(importResult.skipped?.length > 0 || importResult.failed?.length > 0) && (
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Name</th>
+                      <th>Result</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(importResult.failed || []).map((r) => (
+                      <tr key={`failed-${r.row}`}>
+                        <td>{r.row}</td>
+                        <td>{r.name || '—'}</td>
+                        <td>Failed</td>
+                        <td>{r.reason}</td>
+                      </tr>
+                    ))}
+                    {(importResult.skipped || []).map((r) => (
+                      <tr key={`skipped-${r.row}`}>
+                        <td>{r.row}</td>
+                        <td>{r.name || '—'}</td>
+                        <td>Skipped</td>
+                        <td>{r.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="admin-panel">
         <div className="panel-header">

@@ -296,7 +296,8 @@ func revokeAnomalyCheckinHandler(c *gin.Context) {
 		var restaurant Restaurant
 		var user User
 		if db.First(&restaurant, checkin.RestaurantID).Error == nil && db.First(&user, checkin.UserID).Error == nil {
-			newScore := user.Score - restaurant.Stars*10
+			currentStars := currentRestaurantStars(restaurant.ID)
+			newScore := user.Score - currentStars*10
 			if newScore < 0 {
 				newScore = 0
 			}

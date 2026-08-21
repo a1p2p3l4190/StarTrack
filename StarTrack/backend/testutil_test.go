@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -109,11 +110,26 @@ func registerAdmin(t *testing.T, router *gin.Engine, email, password, displayNam
 	return resp.Token, resp.User.ID
 }
 
+// seedRestaurant creates a restaurant plus (when Stars is set) the matching
+// RestaurantStarHistory row a real create-restaurant request would leave
+// behind — Stars/YearAwarded on Restaurant are gorm:"-" now, so without this
+// every test that seeds a rated restaurant and later reads its stars back
+// through the API would see 0.
 func seedRestaurant(t *testing.T, r Restaurant) Restaurant {
 	t.Helper()
+	stars, year := r.Stars, r.YearAwarded
 	if err := db.Create(&r).Error; err != nil {
 		t.Fatalf("failed to seed restaurant: %v", err)
 	}
+	if stars > 0 {
+		if year <= 0 {
+			year = time.Now().Year()
+		}
+		if err := db.Create(&RestaurantStarHistory{RestaurantID: r.ID, Year: year, Stars: stars}).Error; err != nil {
+			t.Fatalf("failed to seed restaurant star history: %v", err)
+		}
+	}
+	r.Stars, r.YearAwarded = stars, year
 	return r
 }
 

@@ -56,7 +56,7 @@ func badgesForUser(userID uint) []gin.H {
 // means adding a row here plus one in db/schema.sql's badges seed.
 var badgeRules = map[string]func(userID uint) bool{
 	"b1": func(userID uint) bool {
-		return verifiedCheckinExists(userID, "restaurants.stars = ?", 3)
+		return verifiedCheckinExists(userID, "current_star.stars = ?", 3)
 	},
 	"b2": func(userID uint) bool {
 		return distinctVerifiedRestaurantCount(userID, "restaurants.city = ?", "Chicago") >= 3
@@ -85,8 +85,10 @@ var badgeRules = map[string]func(userID uint) bool{
 		var total int64
 		db.Raw(`
 			SELECT COALESCE(SUM(stars), 0) FROM (
-				SELECT DISTINCT restaurants.id, restaurants.stars
-				FROM checkins JOIN restaurants ON restaurants.id = checkins.restaurant_id
+				SELECT DISTINCT restaurants.id, current_star.stars AS stars
+				FROM checkins
+				JOIN restaurants ON restaurants.id = checkins.restaurant_id
+				`+currentStarHistoryJoin+`
 				WHERE checkins.user_id = ? AND checkins.verified = true
 			) AS distinct_restaurants
 		`, userID).Scan(&total)
@@ -101,6 +103,7 @@ func verifiedCheckinExists(userID uint, condition string, args ...interface{}) b
 	var count int64
 	query := db.Table("checkins").
 		Joins("JOIN restaurants ON restaurants.id = checkins.restaurant_id").
+		Joins(currentStarHistoryJoin).
 		Where("checkins.user_id = ? AND checkins.verified = ?", userID, true).
 		Where(condition, args...)
 	query.Count(&count)
@@ -111,6 +114,7 @@ func distinctVerifiedRestaurantCount(userID uint, condition string, args ...inte
 	var count int64
 	db.Table("checkins").
 		Joins("JOIN restaurants ON restaurants.id = checkins.restaurant_id").
+		Joins(currentStarHistoryJoin).
 		Where("checkins.user_id = ? AND checkins.verified = ?", userID, true).
 		Where(condition, args...).
 		Distinct("checkins.restaurant_id").

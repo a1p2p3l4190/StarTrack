@@ -65,19 +65,20 @@ export default function UsersTab({ restaurants, toast, guard, onStatsChanged, fo
     }
   }
 
-  async function bulkBanUsers() {
+  async function bulkSetBan(banned) {
     const selected = users.filter((user) => selectedUserIds.has(user.id))
     const skippedAdmins = selected.filter((user) => user.role === 'admin')
-    const targets = selected.filter((user) => user.role !== 'admin' && !user.banned)
+    const targets = selected.filter((user) => user.role !== 'admin' && user.banned !== banned)
     const ids = targets.map((user) => user.id)
     if (!ids.length) return
-    if (!window.confirm(`Ban ${ids.length} selected user${ids.length === 1 ? '' : 's'}? Admin accounts and already banned users will be skipped.`)) return
-    const results = await Promise.allSettled(ids.map((id) => api.banUser(id)))
+    const action = banned ? 'Ban' : 'Unban'
+    if (!window.confirm(`${action} ${ids.length} selected user${ids.length === 1 ? '' : 's'}? Admin accounts and users already in the target state will be skipped.`)) return
+    const results = await Promise.allSettled(ids.map((id) => banned ? api.banUser(id) : api.unbanUser(id)))
     const failed = results.filter((result) => result.status === 'rejected').length
     try {
       setSelectedUserIds(new Set())
       const succeeded = ids.length - failed
-      toast.push(failed ? 'error' : 'success', `${succeeded} banned, ${failed} failed${skippedAdmins.length ? `, ${skippedAdmins.length} admin skipped` : ''}`)
+      toast.push(failed ? 'error' : 'success', `${succeeded} ${banned ? 'banned' : 'unbanned'}, ${failed} failed${skippedAdmins.length ? `, ${skippedAdmins.length} admin skipped` : ''}`)
       fetchUsers()
     } catch (err) {
       toast.push('error', `Could not refresh users: ${err.message}`)
@@ -134,7 +135,10 @@ export default function UsersTab({ restaurants, toast, guard, onStatsChanged, fo
         {selectedUserIds.size > 0 && (
           <div className="panel-header" style={{ marginBottom: 12 }}>
             <span>{selectedUserIds.size} selected on this page</span>
-            <button type="button" className="icon-btn" onClick={bulkBanUsers}>Ban Selected Users</button>
+            <div className="table-actions">
+              <button type="button" className="icon-btn" onClick={() => bulkSetBan(true)}>Ban Selected</button>
+              <button type="button" className="icon-btn" onClick={() => bulkSetBan(false)}>Unban Selected</button>
+            </div>
           </div>
         )}
         <div className="table-scroll">

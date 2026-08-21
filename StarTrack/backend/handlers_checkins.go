@@ -44,6 +44,7 @@ func verifyCheckinHandler(c *gin.Context) {
 		RespondNotFound(c, "Restaurant not found")
 		return
 	}
+	currentYear, currentStars := currentRestaurantAward(restaurant.ID)
 
 	// A flaky connection can make a successful checkin look like it failed on
 	// the client, which invites an immediate retry. Reject that retry instead
@@ -91,7 +92,7 @@ func verifyCheckinHandler(c *gin.Context) {
 	var newBadges []Badge
 	if verified {
 		db.Model(&User{}).Where("id = ?", userID).Updates(map[string]interface{}{
-			"score":  gorm.Expr("score + ?", restaurant.Stars*10),
+			"score":  gorm.Expr("score + ?", currentStars*10),
 			"region": restaurant.City,
 		})
 		newBadges = evaluateBadgesForUser(userID)
@@ -108,7 +109,7 @@ func verifyCheckinHandler(c *gin.Context) {
 		"verified":   verified,
 		"message":    message,
 		"restaurant": restaurant.Name,
-		"badge":      fmt.Sprintf("%d %s Star Achievement", restaurant.YearAwarded, ordinal(restaurant.Stars)),
+		"badge":      fmt.Sprintf("%d %s Star Achievement", currentYear, ordinal(currentStars)),
 		"new_badges": newBadges,
 	})
 }

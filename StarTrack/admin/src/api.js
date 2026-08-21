@@ -91,6 +91,23 @@ export const api = {
     }
     return data.data
   },
+  // Multipart upload, same reasoning as uploadRestaurantPhoto above.
+  importRestaurants: async (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/restaurants/import`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: form,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const error = new Error(data?.error?.message || `Import failed (${res.status})`)
+      error.code = data?.error?.code || 'UNKNOWN_ERROR'
+      throw error
+    }
+    return data.data
+  },
 
   nfcDevices: () => request('/nfc-devices', { auth: true }),
   createNfcDevice: (payload) => request('/nfc-devices', { method: 'POST', body: payload, auth: true }),

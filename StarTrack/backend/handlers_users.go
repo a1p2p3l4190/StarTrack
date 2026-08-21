@@ -130,6 +130,7 @@ func manualVerifyCheckinHandler(c *gin.Context) {
 		RespondNotFound(c, "Restaurant not found")
 		return
 	}
+	currentStars := currentRestaurantStars(restaurant.ID)
 
 	adminID := currentUserID(c)
 	signature := fmt.Sprintf("manual-override:admin-%d", adminID)
@@ -152,7 +153,7 @@ func manualVerifyCheckinHandler(c *gin.Context) {
 	}
 
 	db.Model(&User{}).Where("id = ?", req.UserID).Updates(map[string]interface{}{
-		"score":  gorm.Expr("score + ?", restaurant.Stars*10),
+		"score":  gorm.Expr("score + ?", currentStars*10),
 		"region": restaurant.City,
 	})
 	newBadges := evaluateBadgesForUser(req.UserID)

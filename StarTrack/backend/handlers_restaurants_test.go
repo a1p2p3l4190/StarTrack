@@ -1,13 +1,41 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// buildMultipartCSVRequest builds a POST with a single "file" CSV part,
+// mirroring buildMultipartPhotoRequest's shape for the photo upload endpoint.
+func buildMultipartCSVRequest(t *testing.T, path, token, csvContent string) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", "restaurants.csv")
+	if err != nil {
+		t.Fatalf("failed to create multipart part: %v", err)
+	}
+	if _, err := part.Write([]byte(csvContent)); err != nil {
+		t.Fatalf("failed to write multipart content: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, path, &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req
+}
 
 func TestNextReleaseDate(t *testing.T) {
 	from := time.Date(2026, time.March, 15, 12, 0, 0, 0, time.UTC)
@@ -625,10 +653,11 @@ func TestUpdateRestaurant_IgnoresBodySuppliedID(t *testing.T) {
 		t.Fatalf("expected update to modify the existing row, not create a new one — count went from %d to %d", countBefore, countAfter)
 	}
 
-	var reloaded Restaurant
-	db.First(&reloaded, restaurant.ID)
-	if reloaded.Stars != 3 {
-		t.Errorf("expected restaurant %d updated to 3 stars in place, got %d", restaurant.ID, reloaded.Stars)
+	// Stars isn't a stored column anymore (see RestaurantStarHistory) — a
+	// plain db.First wouldn't see the update, so check the real source of
+	// truth instead.
+	if got := currentRestaurantStars(restaurant.ID); got != 3 {
+		t.Errorf("expected restaurant %d updated to 3 stars in place, got %d", restaurant.ID, got)
 	}
 }
 
@@ -656,5 +685,77 @@ func TestNFCDeviceStatus_DisabledDeviceRejectsCheckin(t *testing.T) {
 	decodeJSON(t, w, &resp)
 	if resp.Verified {
 		t.Error("expected verified=false for a disabled device")
+	}
+}
+
+func TestImportRestaurants_RequiresAdmin(t *testing.T) {
+	router, _ := newTestApp(t)
+	userToken, _ := registerUser(t, router, "user@example.com", "hunter22", "Regular User")
+
+	req := buildMultipartCSVRequest(t, "/api/restaurants/import", userToken, "name,city,cuisine,stars\nNew Spot,Austin,Tex-Mex,1\n")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-admin import, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportRestaurants_CreatesSkipsAndFails(t *testing.T) {
+	router, _ := newTestApp(t)
+	adminToken, _ := registerAdmin(t, router, "admin@example.com", "hunter22", "Admin")
+	seedRestaurant(t, Restaurant{Name: "Aurum Table", Stars: 3, City: "Chicago", Cuisine: "Contemporary", YearAwarded: 2026})
+
+	csvBody := "name,city,cuisine,stars,year_awarded\n" +
+		"New Spot,Austin,Tex-Mex,1,2026\n" + // valid — created
+		"Aurum Table,Chicago,Contemporary,3,2026\n" + // duplicate of the seeded row — skipped
+		"Bad Stars,Denver,American,9,2026\n" + // stars out of range — failed
+		",Missing Name,American,2\n" // missing name — failed
+
+	req := buildMultipartCSVRequest(t, "/api/restaurants/import", adminToken, csvBody)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Created []importRowResult `json:"created"`
+		Skipped []importRowResult `json:"skipped"`
+		Failed  []importRowResult `json:"failed"`
+	}
+	decodeJSON(t, w, &resp)
+
+	if len(resp.Created) != 1 || resp.Created[0].Name != "New Spot" {
+		t.Errorf("expected exactly New Spot created, got %+v", resp.Created)
+	}
+	if len(resp.Skipped) != 1 || resp.Skipped[0].Name != "Aurum Table" {
+		t.Errorf("expected Aurum Table skipped as a duplicate, got %+v", resp.Skipped)
+	}
+	if len(resp.Failed) != 2 {
+		t.Errorf("expected 2 failed rows (bad stars, missing name), got %+v", resp.Failed)
+	}
+
+	var restaurants []Restaurant
+	db.Where("name = ?", "New Spot").Find(&restaurants)
+	if len(restaurants) != 1 {
+		t.Fatalf("expected New Spot to actually be persisted, found %d rows", len(restaurants))
+	}
+
+	var count int64
+	db.Model(&Restaurant{}).Where("name = ?", "Aurum Table").Count(&count)
+	if count != 1 {
+		t.Errorf("expected the duplicate row not to create a second Aurum Table, found %d", count)
+	}
+}
+
+func TestImportRestaurants_MissingRequiredColumn(t *testing.T) {
+	router, _ := newTestApp(t)
+	adminToken, _ := registerAdmin(t, router, "admin@example.com", "hunter22", "Admin")
+
+	req := buildMultipartCSVRequest(t, "/api/restaurants/import", adminToken, "name,city,stars\nNew Spot,Austin,1\n")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for CSV missing the cuisine column, got %d: %s", w.Code, w.Body.String())
 	}
 }

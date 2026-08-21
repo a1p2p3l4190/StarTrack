@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -56,6 +58,100 @@ type restaurantRatingRow struct {
 	RestaurantID uint
 	AvgRating    float64
 	Count        int
+}
+
+// currentRestaurantStars returns the stars from a restaurant's newest
+// RestaurantStarHistory entry, or 0 if it has none (shouldn't normally
+// happen — every restaurant gets a history row the moment its first Stars
+// value is set, via createRestaurantHandler/updateRestaurantHandler/
+// importRestaurantsHandler).
+func currentRestaurantStars(restaurantID uint) int {
+	var latest RestaurantStarHistory
+	if err := db.Where("restaurant_id = ?", restaurantID).Order("year desc, id desc").First(&latest).Error; err == nil {
+		return latest.Stars
+	}
+	return 0
+}
+
+// currentRestaurantAward returns (year, stars) from a restaurant's newest
+// RestaurantStarHistory entry, or (0, 0) if it has none.
+func currentRestaurantAward(restaurantID uint) (year int, stars int) {
+	var latest RestaurantStarHistory
+	if err := db.Where("restaurant_id = ?", restaurantID).Order("year desc, id desc").First(&latest).Error; err == nil {
+		return latest.Year, latest.Stars
+	}
+	return 0, 0
+}
+
+// hydrateCurrentStarSnapshots projects each restaurant's newest history row
+// onto its Stars/YearAwarded fields for the API response — those fields are
+// gorm:"-" (never stored), so every read path needs this to populate them.
+func hydrateCurrentStarSnapshots(restaurants []Restaurant) {
+	if len(restaurants) == 0 {
+		return
+	}
+	ids := make([]uint, len(restaurants))
+	for i, restaurant := range restaurants {
+		ids[i] = restaurant.ID
+	}
+	var history []RestaurantStarHistory
+	db.Where("restaurant_id IN ?", ids).Order("year desc, id desc").Find(&history)
+	latest := make(map[uint]RestaurantStarHistory, len(ids))
+	for _, entry := range history {
+		if _, exists := latest[entry.RestaurantID]; !exists {
+			latest[entry.RestaurantID] = entry
+		}
+	}
+	for i := range restaurants {
+		if entry, ok := latest[restaurants[i].ID]; ok {
+			restaurants[i].Stars = entry.Stars
+			restaurants[i].YearAwarded = entry.Year
+		}
+	}
+}
+
+// migrateRestaurantStarHistory is a one-time backfill for databases created
+// before Stars/YearAwarded moved off the restaurants table: it reads
+// whatever was left in those now-unmanaged columns and turns each into a
+// RestaurantStarHistory row, for any restaurant that doesn't already have
+// history. Safe to run on every startup — a fresh schema (tests, or a
+// database that's already been migrated) never had the legacy columns, so
+// HasColumn short-circuits it to a no-op.
+func migrateRestaurantStarHistory() error {
+	if !db.Migrator().HasColumn(&Restaurant{}, "stars") {
+		return nil
+	}
+
+	type legacyRestaurantStars struct {
+		ID          uint
+		Stars       int
+		YearAwarded int
+	}
+	var legacy []legacyRestaurantStars
+	if err := db.Raw("SELECT id, stars, year_awarded FROM restaurants").Scan(&legacy).Error; err != nil {
+		return err
+	}
+
+	for _, r := range legacy {
+		if r.Stars <= 0 {
+			continue
+		}
+		var count int64
+		if err := db.Model(&RestaurantStarHistory{}).Where("restaurant_id = ?", r.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		year := r.YearAwarded
+		if year <= 0 {
+			year = time.Now().Year()
+		}
+		if err := db.Create(&RestaurantStarHistory{RestaurantID: r.ID, Year: year, Stars: r.Stars}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hydrateRatings computes each restaurant's average review rating and review
@@ -147,17 +243,30 @@ func caseInsensitiveContains(column, value string) (string, string) {
 	return "LOWER(" + column + ") LIKE ?", "%" + strings.ToLower(value) + "%"
 }
 
+// currentStarHistoryJoin is the portable (SQLite + Postgres) SQL fragment
+// that left-joins each restaurant to its newest RestaurantStarHistory row,
+// aliased as current_star(restaurant_id, stars, year). Stars/YearAwarded
+// aren't real restaurant columns anymore, so filtering/sorting by them has
+// to go through this instead of a plain WHERE/ORDER BY on the table.
+const currentStarHistoryJoin = `LEFT JOIN (
+	SELECT h1.restaurant_id, h1.stars, h1.year
+	FROM restaurant_star_histories h1
+	WHERE h1.year = (
+		SELECT MAX(h2.year) FROM restaurant_star_histories h2 WHERE h2.restaurant_id = h1.restaurant_id
+	)
+) AS current_star ON current_star.restaurant_id = restaurants.id`
+
 // restaurantSortColumns whitelists which columns the admin portal's
 // Restaurant Engine table may sort by — never interpolate c.Query("sort")
 // directly into SQL. Public callers (mobile/web) never pass "sort", so they
 // keep the default stars/year ordering below unaffected.
 var restaurantSortColumns = map[string]string{
-	"name":         "name",
-	"stars":        "stars",
-	"price_tier":   "price_tier",
-	"city":         "city",
-	"cuisine":      "cuisine",
-	"year_awarded": "year_awarded",
+	"name":         "restaurants.name",
+	"stars":        "current_star.stars",
+	"price_tier":   "restaurants.price_tier",
+	"city":         "restaurants.city",
+	"cuisine":      "restaurants.cuisine",
+	"year_awarded": "current_star.year",
 }
 
 func listRestaurantsHandler(c *gin.Context) {
@@ -168,19 +277,19 @@ func listRestaurantsHandler(c *gin.Context) {
 		if c.Query("order") == "asc" {
 			direction = "asc"
 		}
-		query = db.Order(column + " " + direction)
+		query = db.Joins(currentStarHistoryJoin).Order(column + " " + direction)
 	} else {
-		query = db.Order("stars desc, year_awarded desc")
+		query = db.Joins(currentStarHistoryJoin).Order("current_star.stars desc, current_star.year desc")
 	}
 
 	if year := c.Query("year"); year != "" {
 		if num, err := strconv.Atoi(year); err == nil {
-			query = query.Where("year_awarded = ?", num)
+			query = query.Where("current_star.year = ?", num)
 		}
 	}
 	if tier := c.Query("stars"); tier != "" {
 		if num, err := strconv.Atoi(tier); err == nil {
-			query = query.Where("stars = ?", num)
+			query = query.Where("current_star.stars = ?", num)
 		}
 	}
 	if cuisine := c.Query("cuisine"); cuisine != "" {
@@ -203,6 +312,7 @@ func listRestaurantsHandler(c *gin.Context) {
 	limitStr := c.Query("limit")
 	if limitStr == "" {
 		query.Find(&restaurants)
+		hydrateCurrentStarSnapshots(restaurants)
 		hydrateNextRelease(restaurants)
 		hydrateRatings(restaurants)
 		hydrateIsOpen(restaurants)
@@ -222,6 +332,7 @@ func listRestaurantsHandler(c *gin.Context) {
 	var total int64
 	query.Model(&Restaurant{}).Count(&total)
 	query.Offset((page - 1) * limit).Limit(limit).Find(&restaurants)
+	hydrateCurrentStarSnapshots(restaurants)
 	hydrateNextRelease(restaurants)
 	hydrateRatings(restaurants)
 	hydrateIsOpen(restaurants)
@@ -242,6 +353,7 @@ func getRestaurantHandler(c *gin.Context) {
 	}
 	restaurant.NextReservationRelease = nextReleaseDate(restaurant.ReservationReleaseDay, time.Now())
 	single := []Restaurant{restaurant}
+	hydrateCurrentStarSnapshots(single)
 	hydrateRatings(single)
 	hydrateIsOpen(single)
 	RespondSuccess(c, http.StatusOK, single[0])
@@ -331,6 +443,14 @@ func createRestaurantHandler(c *gin.Context) {
 		RespondValidationError(c, "Unknown reservation platform", nil)
 		return
 	}
+	// YearAwarded has no validation of its own (0 used to mean "unknown"),
+	// but now that RestaurantStarHistory is the only place Stars lives,
+	// every restaurant needs a real year to attach its first entry to —
+	// default to the current guide year rather than silently dropping the
+	// Stars the admin just set.
+	if payload.YearAwarded <= 0 {
+		payload.YearAwarded = time.Now().Year()
+	}
 	if err := db.Create(&payload).Error; err != nil {
 		RespondInternalError(c, "Failed to create restaurant")
 		return
@@ -338,11 +458,180 @@ func createRestaurantHandler(c *gin.Context) {
 	// Seed one star-history row from the current tier/year so a freshly
 	// created restaurant already has a starting point — admins can still add
 	// earlier years afterward via the star-history endpoint.
-	if payload.YearAwarded > 0 {
-		db.Create(&RestaurantStarHistory{RestaurantID: payload.ID, Year: payload.YearAwarded, Stars: payload.Stars})
+	if err := db.Create(&RestaurantStarHistory{RestaurantID: payload.ID, Year: payload.YearAwarded, Stars: payload.Stars}).Error; err != nil {
+		RespondInternalError(c, "Failed to create restaurant star history")
+		return
 	}
 	payload.NextReservationRelease = nextReleaseDate(payload.ReservationReleaseDay, time.Now())
 	RespondSuccess(c, http.StatusCreated, payload)
+}
+
+// importRowResult reports what happened to one CSV row — used for all three
+// buckets (created/skipped/failed) so the admin portal can render one table.
+type importRowResult struct {
+	Row    int    `json:"row"`
+	Name   string `json:"name"`
+	ID     uint   `json:"id,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+var requiredRestaurantImportColumns = []string{"name", "city", "cuisine", "stars"}
+
+// importRestaurantsHandler bulk-creates restaurants from an uploaded CSV —
+// built for the annual Michelin Guide release, where dozens of restaurants
+// land at once and filling out the single-restaurant form that many times
+// isn't realistic. Each row is validated and inserted independently (one bad
+// row shouldn't block the other 49), and duplicates (same name+city as an
+// existing restaurant, matching the single-create form's own duplicate
+// check) are skipped rather than erroring.
+func importRestaurantsHandler(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		RespondValidationError(c, "CSV file is required", nil)
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		RespondInternalError(c, "Failed to read uploaded CSV")
+		return
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1 // tolerate short/ragged rows rather than erroring the whole file
+	header, err := reader.Read()
+	if err != nil {
+		RespondValidationError(c, "Could not read CSV header row", map[string]string{"error": err.Error()})
+		return
+	}
+	colIndex := map[string]int{}
+	for i, h := range header {
+		colIndex[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+	for _, col := range requiredRestaurantImportColumns {
+		if _, ok := colIndex[col]; !ok {
+			RespondValidationError(c, fmt.Sprintf("CSV is missing required column %q", col), nil)
+			return
+		}
+	}
+	get := func(row []string, col string) string {
+		idx, ok := colIndex[col]
+		if !ok || idx >= len(row) {
+			return ""
+		}
+		return strings.TrimSpace(row[idx])
+	}
+
+	dedupeKey := func(name, city string) string {
+		return strings.ToLower(name) + "|" + strings.ToLower(city)
+	}
+	var existing []Restaurant
+	db.Find(&existing)
+	seen := make(map[string]bool, len(existing))
+	for _, r := range existing {
+		seen[dedupeKey(r.Name, r.City)] = true
+	}
+
+	var created, skipped, failed []importRowResult
+	rowNum := 1 // header is row 1, so the first data row is 2 — matches what a spreadsheet shows
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		rowNum++
+		if err != nil {
+			failed = append(failed, importRowResult{Row: rowNum, Reason: "could not parse row: " + err.Error()})
+			continue
+		}
+
+		name := get(row, "name")
+		city := get(row, "city")
+		cuisine := get(row, "cuisine")
+		starsStr := get(row, "stars")
+		if name == "" || city == "" || cuisine == "" || starsStr == "" {
+			failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "name, city, cuisine, and stars are required"})
+			continue
+		}
+		stars, err := strconv.Atoi(starsStr)
+		if err != nil || !validStars(stars) {
+			failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "stars must be a number between 1 and 3"})
+			continue
+		}
+
+		key := dedupeKey(name, city)
+		if seen[key] {
+			skipped = append(skipped, importRowResult{Row: rowNum, Name: name, Reason: fmt.Sprintf("a restaurant named %q already exists in %q", name, city)})
+			continue
+		}
+
+		priceTier := 0
+		if v := get(row, "price_tier"); v != "" {
+			priceTier, err = strconv.Atoi(v)
+			if err != nil || !validPriceTier(priceTier) {
+				failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "price tier must be a number between 0 and 3"})
+				continue
+			}
+		}
+		releaseDay := 0
+		if v := get(row, "reservation_release_day"); v != "" {
+			releaseDay, err = strconv.Atoi(v)
+			if err != nil || !validReleaseDay(releaseDay) {
+				failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "reservation release day must be a number between 0 and 31"})
+				continue
+			}
+		}
+		platform := get(row, "reservation_platform")
+		if !validReservationPlatform(platform) {
+			failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "reservation platform must be blank, opentable, resy, or website"})
+			continue
+		}
+		yearAwarded, _ := strconv.Atoi(get(row, "year_awarded"))
+		if yearAwarded <= 0 {
+			// year_awarded is an optional CSV column, but every restaurant
+			// needs a real year to attach its first star-history entry to —
+			// default to the current guide year rather than silently
+			// dropping the stars this row just set.
+			yearAwarded = time.Now().Year()
+		}
+		country := get(row, "country")
+		if country == "" {
+			country = "USA"
+		}
+
+		restaurant := Restaurant{
+			Name:                  name,
+			City:                  city,
+			Cuisine:               cuisine,
+			Stars:                 stars,
+			Country:               country,
+			Address:               get(row, "address"),
+			YearAwarded:           yearAwarded,
+			PriceTier:             priceTier,
+			ReservationReleaseDay: releaseDay,
+			ReservationPlatform:   platform,
+			ReservationURL:        get(row, "reservation_url"),
+			PhotoURL:              get(row, "photo_url"),
+		}
+		if err := db.Create(&restaurant).Error; err != nil {
+			failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "database error: " + err.Error()})
+			continue
+		}
+		if err := db.Create(&RestaurantStarHistory{RestaurantID: restaurant.ID, Year: restaurant.YearAwarded, Stars: restaurant.Stars}).Error; err != nil {
+			failed = append(failed, importRowResult{Row: rowNum, Name: name, Reason: "failed to create star history: " + err.Error()})
+			continue
+		}
+		seen[key] = true
+		created = append(created, importRowResult{Row: rowNum, Name: name, ID: restaurant.ID})
+	}
+
+	logAuditEvent(c, "BULK_IMPORT_RESTAURANTS", "restaurant", nil, fmt.Sprintf("created=%d skipped=%d failed=%d", len(created), len(skipped), len(failed)))
+
+	RespondSuccess(c, http.StatusOK, map[string]interface{}{
+		"created": created,
+		"skipped": skipped,
+		"failed":  failed,
+	})
 }
 
 func updateRestaurantHandler(c *gin.Context) {
@@ -378,18 +667,22 @@ func updateRestaurantHandler(c *gin.Context) {
 		RespondValidationError(c, "Unknown reservation platform", nil)
 		return
 	}
+	// See createRestaurantHandler — every restaurant needs a real year to
+	// attach its star-history entry to, so a blank YearAwarded defaults to
+	// the current guide year rather than silently dropping the new Stars.
+	if restaurant.YearAwarded <= 0 {
+		restaurant.YearAwarded = time.Now().Year()
+	}
 	db.Save(&restaurant)
 	// Keep the current year's star-history entry in sync with the fields
 	// that just got saved — editing this year's tier shouldn't leave a
 	// stale duplicate sitting in the history table.
-	if restaurant.YearAwarded > 0 {
-		var existing RestaurantStarHistory
-		err := db.Where("restaurant_id = ? AND year = ?", restaurant.ID, restaurant.YearAwarded).First(&existing).Error
-		if err != nil {
-			db.Create(&RestaurantStarHistory{RestaurantID: restaurant.ID, Year: restaurant.YearAwarded, Stars: restaurant.Stars})
-		} else if existing.Stars != restaurant.Stars {
-			db.Model(&existing).Update("stars", restaurant.Stars)
-		}
+	var existing RestaurantStarHistory
+	err := db.Where("restaurant_id = ? AND year = ?", restaurant.ID, restaurant.YearAwarded).First(&existing).Error
+	if err != nil {
+		db.Create(&RestaurantStarHistory{RestaurantID: restaurant.ID, Year: restaurant.YearAwarded, Stars: restaurant.Stars})
+	} else if existing.Stars != restaurant.Stars {
+		db.Model(&existing).Update("stars", restaurant.Stars)
 	}
 	restaurant.NextReservationRelease = nextReleaseDate(restaurant.ReservationReleaseDay, time.Now())
 	RespondSuccess(c, http.StatusOK, restaurant)
@@ -523,7 +816,19 @@ func updateRestaurantHoursHandler(c *gin.Context) {
 
 func deleteRestaurantHandler(c *gin.Context) {
 	id := c.Param("id")
-	if err := db.Delete(&Restaurant{}, id).Error; err != nil {
+	// RestaurantStarHistory and RestaurantHours both carry a real FK back to
+	// restaurants — deleting the restaurant first (or not at all, on
+	// failure) would violate it, so clear them in the same transaction.
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("restaurant_id = ?", id).Delete(&RestaurantStarHistory{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("restaurant_id = ?", id).Delete(&RestaurantHours{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&Restaurant{}, id).Error
+	})
+	if err != nil {
 		RespondInternalError(c, "Failed to delete restaurant")
 		return
 	}

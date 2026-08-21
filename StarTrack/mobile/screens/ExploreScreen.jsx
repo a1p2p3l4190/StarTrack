@@ -185,10 +185,10 @@ export default function ExploreScreen({
                   </View>
                 )}
 
-                <View style={styles.restaurantCardBody}>
+                <View style={[styles.restaurantCardBody, { minWidth: 0 }]}>
                   <View style={styles.cardHeader}>
-                    <Text style={styles.restaurantName} numberOfLines={1}>{restaurant.name}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={[styles.restaurantName, { flex: 1, minWidth: 0, marginRight: 8 }]} numberOfLines={2} ellipsizeMode="tail">{restaurant.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
                       <Text style={styles.starRating}>{'★'.repeat(restaurant.stars)}</Text>
                       <Pressable onPress={(event) => { event.stopPropagation?.(); onToggleSaved?.(restaurant); }} hitSlop={10} style={{ marginLeft: 8 }}>
                         <Text style={{ fontSize: 19, color: wishlistIds?.has(String(restaurant.id)) ? '#d2a14c' : '#6b6b70' }}>{wishlistIds?.has(String(restaurant.id)) ? '♥' : '♡'}</Text>

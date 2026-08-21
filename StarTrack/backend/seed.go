@@ -36,6 +36,14 @@ func seedRestaurantsAndDevices() {
 	}
 	db.Create(&restaurants)
 
+	// Stars/YearAwarded aren't stored on Restaurant — each seeded restaurant
+	// needs its own RestaurantStarHistory row to actually show a rating.
+	starHistory := make([]RestaurantStarHistory, 0, len(restaurants))
+	for _, r := range restaurants {
+		starHistory = append(starHistory, RestaurantStarHistory{RestaurantID: r.ID, Year: r.YearAwarded, Stars: r.Stars})
+	}
+	db.Create(&starHistory)
+
 	devices := []NFCDevice{
 		{TagID: "TAG-STAR-001", RestaurantID: restaurants[0].ID, Salt: "golden-salt-2026"},
 		{TagID: "TAG-STAR-002", RestaurantID: restaurants[1].ID, Salt: "ruby-salt-2025"},
@@ -192,7 +200,7 @@ func seedDemoActivity() {
 			CreatedAt:    visitedAt,
 		}
 		db.Create(&checkin)
-		totalScoreGain += r.Stars * 10
+		totalScoreGain += currentRestaurantStars(r.ID) * 10
 
 		if v.reviewRating > 0 {
 			review := Review{
