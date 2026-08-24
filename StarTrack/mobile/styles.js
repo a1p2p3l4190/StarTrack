@@ -22,19 +22,20 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: '#f8f1e6',
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.3,
+    lineHeight: 34,
   },
   section: {
     marginBottom: 28,
   },
   sectionHeading: {
     color: '#f7e8d3',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 14,
+    letterSpacing: 0.4,
+    marginBottom: 18,
     textTransform: 'uppercase',
   },
   brandGold: {
@@ -433,7 +434,7 @@ export const styles = StyleSheet.create({
   splitterCard: {
     backgroundColor: '#121317',
     borderRadius: 24,
-    padding: 20,
+    padding: 22,
     borderWidth: 1,
     borderColor: '#1d1e24',
     shadowColor: '#000',
@@ -452,7 +453,7 @@ export const styles = StyleSheet.create({
   },
   inputLabel: {
     color: '#8a867e',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     marginBottom: 6,
     textTransform: 'uppercase',
@@ -526,8 +527,8 @@ export const styles = StyleSheet.create({
   },
   copyShareButton: {
     backgroundColor: '#d2a14c',
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderRadius: 14,
+    paddingVertical: 13,
     alignItems: 'center',
     marginTop: 16,
   },

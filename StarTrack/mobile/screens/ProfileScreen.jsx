@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, Alert, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { styles } from '../styles';
 import { api, setAuthToken } from '../api';
 import { pickAvatar, uploadAvatarImage } from '../avatarStorage';
+import InteractivePressable from '../components/InteractivePressable';
+
+const Pressable = InteractivePressable;
 
 const tabs = ['Profile', 'Account', 'Security'];
 const regionOptions = ['Global', 'North America', 'United States', 'Chicago', 'New York', 'San Francisco', 'Europe', 'Europe / UK', 'Asia', 'Japan', 'Taiwan', 'Other'];
@@ -55,6 +58,12 @@ export default function ProfileScreen({ currentUser, onUserUpdated, onLogout }) 
     setInstagram(currentUser?.instagram || '');
     setXHandle(currentUser?.x || '');
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(() => setMessage(''), 2500);
+    return () => clearTimeout(timer);
+  }, [message]);
 
   const handleAvatarUpload = async () => {
     try {
@@ -391,16 +400,18 @@ export default function ProfileScreen({ currentUser, onUserUpdated, onLogout }) 
           </View>
         ) : null}
 
-        <View style={{ flexDirection: 'row', backgroundColor: '#101115', borderRadius: 16, borderWidth: 1, borderColor: '#292c34', padding: 4, marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', backgroundColor: '#101115', borderRadius: 16, borderWidth: 1, borderColor: '#292c34', padding: 5, marginBottom: 16, gap: 4 }}>
           {tabs.map((tab) => {
             const isActive = activeTab === tab;
             return (
               <Pressable
                 key={tab}
                 onPress={() => setActiveTab(tab)}
+                containerStyle={{ flex: 1 }}
                 style={{
                   flex: 1,
-                  paddingVertical: 10,
+                  paddingVertical: 11,
+                  paddingHorizontal: 5,
                   borderRadius: 12,
                   backgroundColor: isActive ? '#1e1f26' : 'transparent',
                   borderWidth: isActive ? 1 : 0,
@@ -408,7 +419,7 @@ export default function ProfileScreen({ currentUser, onUserUpdated, onLogout }) 
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: isActive ? '#f6f0e7' : '#8d8c91', fontSize: 12, fontWeight: '700' }}>{tab}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{ color: isActive ? '#f6f0e7' : '#8d8c91', fontSize: 12, letterSpacing: 0.15, fontWeight: '700' }}>{tab}</Text>
               </Pressable>
             );
           })}

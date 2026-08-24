@@ -9,13 +9,14 @@ import { ReviewCardSkeleton } from '../components/Shimmer';
 import { ErrorMessage, Toast, EmptyState } from '../components/ErrorDisplay';
 import RestaurantPlaceholder from '../components/RestaurantPlaceholder';
 import InteractivePressable from '../components/InteractivePressable';
+import AppIcon from '../components/AppIcon';
 
 const formatDate = (iso) => new Date(iso).toISOString().split('T')[0];
 
 const RESERVATION_PLATFORM_META = {
-  opentable: { icon: '🍽️', label: 'Reserve on OpenTable' },
-  resy: { icon: '📅', label: 'Reserve on Resy' },
-  website: { icon: '🔗', label: "Book on Restaurant's Website" },
+  opentable: { icon: 'dining', label: 'Reserve on OpenTable' },
+  resy: { icon: 'calendar', label: 'Reserve on Resy' },
+  website: { icon: 'link', label: "Book on Restaurant's Website" },
 };
 
 const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -39,6 +40,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
   const [reviewSearch, setReviewSearch] = useState('');
   const [reviewSort, setReviewSort] = useState('newest');
   const [reviewsWithPhotosOnly, setReviewsWithPhotosOnly] = useState(false);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [photoGallery, setPhotoGallery] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -309,15 +311,15 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
             <Text style={styles.title} numberOfLines={3} ellipsizeMode="tail">{restaurant.name}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
-            <InteractivePressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
+            <InteractivePressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#244238' : 'transparent', borderColor: isSaved ? '#4f9b76' : '#4a4032' }]}>
               <Text style={{ color: isSaved ? '#7ce8b4' : '#f8f0e9', fontWeight: '700' }}>{savingFavorite ? '...' : (isSaved ? 'Saved' : 'Save')}</Text>
             </InteractivePressable>
-            <InteractivePressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
-              <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
+            <InteractivePressable onPress={onClose} style={[styles.badge, { backgroundColor: 'transparent', borderColor: '#292b33' }]}>
+              <Text style={{ color: '#aaa39a', fontWeight: '700' }}>Close</Text>
             </InteractivePressable>
           </View>
         </View>
-        <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 8 }]}> 
+          <Text style={[styles.restaurantMeta, { fontSize: 13, marginBottom: 12, lineHeight: 20 }]}> 
           📍 {restaurant.city}, {restaurant.country} · Released: {restaurant.year || restaurant.year_awarded || '—'} · Tier: {'★'.repeat(restaurant.stars)}
         </Text>
         {restaurant.review_count > 0 ? (
@@ -332,8 +334,8 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         <View style={[styles.splitterCard, { padding: 0, marginBottom: 16, overflow: 'hidden' }]}>
           <InteractivePressable onPress={toggleHours} style={{ padding: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: currentlyOpen ? '#18c89a' : '#ff6b6b', marginRight: 12, shadowColor: currentlyOpen ? '#18c89a' : '#ff6b6b', shadowOpacity: 0.6, shadowRadius: 5 }} />
-              <Text style={{ color: currentlyOpen ? '#7ce8b4' : '#ff8585', fontSize: 16, fontWeight: '800' }}>{currentlyOpen ? 'Open now' : 'Closed'}</Text>
+              <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: currentlyOpen ? '#65c9a5' : '#a95f68', marginRight: 12, shadowColor: currentlyOpen ? '#65c9a5' : '#a95f68', shadowOpacity: 0.45, shadowRadius: 5 }} />
+              <Text style={{ color: currentlyOpen ? '#9be0c2' : '#d9949a', fontSize: 16, fontWeight: '800' }}>{currentlyOpen ? 'Open now' : 'Closed'}</Text>
               <Text numberOfLines={1} style={{ color: '#8e8982', fontSize: 14, marginLeft: 12, flex: 1 }}>{todayHours ? formatHoursEntry(todayHours) : 'Hours unavailable'}</Text>
               <Text style={{ color: '#f3e8d8', fontSize: 24, lineHeight: 22 }}>{hoursExpanded ? '⌃' : '⌄'}</Text>
             </View>
@@ -379,10 +381,17 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
         {restaurant.reservation_url ? (
           <InteractivePressable style={[styles.copyShareButton, { marginBottom: 20 }]} onPress={openReservationLink}>
-            <Text style={styles.copyShareButtonText}>
-              {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).icon}{' '}
-              {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).label}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <AppIcon
+                name={(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).icon}
+                size={17}
+                color="#09090d"
+                strokeWidth={2}
+              />
+              <Text style={styles.copyShareButtonText}>
+                {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).label}
+              </Text>
+            </View>
           </InteractivePressable>
         ) : null}
 
@@ -401,21 +410,30 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
                 returnKeyType="search"
               />
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>SORT</Text>
-                {[['newest', 'Newest'], ['highest', 'Highest Rated'], ['lowest', 'Lowest Rated']].map(([value, label]) => (
-                  <Pressable key={value} onPress={() => setReviewSort(value)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13 }, reviewSort === value && styles.badgeActive]}>
-                    <Text style={[styles.badgeLabel, reviewSort === value && styles.badgeLabelActive]}>{label}</Text>
-                  </Pressable>
-                ))}
-                <View style={{ width: 1, height: 20, backgroundColor: '#303037', marginHorizontal: 3 }} />
-                <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>FILTER</Text>
-                <Pressable onPress={() => setReviewsWithPhotosOnly((enabled) => !enabled)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13 }, reviewsWithPhotosOnly && styles.badgeActive]}>
-                  <Text style={[styles.badgeLabel, reviewsWithPhotosOnly && styles.badgeLabelActive]}>Photos</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10, zIndex: 5 }}>
+              <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>SORT</Text>
+              <View style={{ position: 'relative', zIndex: 5 }}>
+                <Pressable onPress={() => setSortMenuOpen((open) => !open)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13, marginRight: 0, flexDirection: 'row', alignItems: 'center', gap: 8 }, sortMenuOpen && styles.badgeActive]}>
+                  <Text style={[styles.badgeLabel, sortMenuOpen && styles.badgeLabelActive]}>
+                    {reviewSort === 'highest' ? 'Highest Rated' : reviewSort === 'lowest' ? 'Lowest Rated' : 'Newest'}
+                  </Text>
+                  <Text style={{ color: sortMenuOpen ? '#09090d' : '#d2a14c', fontSize: 13 }}>{sortMenuOpen ? '⌃' : '⌄'}</Text>
                 </Pressable>
+                {sortMenuOpen ? (
+                  <View style={{ position: 'absolute', top: 43, left: 0, width: 148, backgroundColor: '#1a1b21', borderRadius: 14, borderWidth: 1, borderColor: '#3a3022', padding: 5, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, elevation: 8 }}>
+                    {[['newest', 'Newest'], ['highest', 'Highest Rated'], ['lowest', 'Lowest Rated']].map(([value, label]) => (
+                      <Pressable key={value} onPress={() => { setReviewSort(value); setSortMenuOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 10, borderRadius: 9, backgroundColor: reviewSort === value ? '#d2a14c' : 'transparent' }}>
+                        <Text style={{ color: reviewSort === value ? '#09090d' : '#f1e9de', fontSize: 12, fontWeight: reviewSort === value ? '800' : '600' }}>{label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
-            </ScrollView>
+              <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginLeft: 4 }}>FILTER</Text>
+              <Pressable onPress={() => setReviewsWithPhotosOnly((enabled) => !enabled)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13, marginRight: 0 }, reviewsWithPhotosOnly && styles.badgeActive]}>
+                <Text style={[styles.badgeLabel, reviewsWithPhotosOnly && styles.badgeLabelActive]}>Photos</Text>
+              </Pressable>
+            </View>
           </>
         ) : null}
         {loadingReviews ? (
@@ -448,7 +466,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                   <Text style={{ color: '#d2a14c', fontSize: 15, letterSpacing: 1 }}>{'★'.repeat(r.rating || 0)}{'☆'.repeat(Math.max(0, 5 - (r.rating || 0)))}</Text>
                 </View>
-                <Text style={{ color: '#f8f0e9', fontSize: 14, lineHeight: 21, marginBottom: 12 }}>{r.comment}</Text>
+                <Text style={{ color: '#f8f0e9', fontSize: 15, lineHeight: 23, marginBottom: 14 }}>{r.comment}</Text>
 
                 {r.photos && r.photos.length > 0 ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
@@ -600,7 +618,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         ) : (
           <View style={[styles.statusIndicatorBar, { backgroundColor: '#141311', borderColor: '#2a2215', padding: 16 }]}>
             <Text style={{ color: '#8e8982', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
-              🔒 Review submission access is locked. Check in via NFC at this establishment to unlock a review for that visit.
+              Review submission access is locked. Check in via NFC at this establishment to unlock a review for that visit.
             </Text>
           </View>
         )}
