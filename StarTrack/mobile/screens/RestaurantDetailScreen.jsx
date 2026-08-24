@@ -1,6 +1,6 @@
 // screens/RestaurantDetailScreen.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Keyboard, ActivityIndicator, Platform, Image, Alert, Linking } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, Pressable, TextInput, Keyboard, ActivityIndicator, Platform, Image, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
 import { styles } from '../styles';
 import { api } from '../api';
 import { isRestaurantOpen, formatHoursEntry, summarizeTodayHours } from '../utils';
@@ -21,6 +21,7 @@ const RESERVATION_PLATFORM_META = {
 const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function RestaurantDetailScreen({ restaurant, currentUser, onClose, onSavedChanged }) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [comment, setComment] = useState('');
   const [rating, setRating] = useState(5);
   const [photos, setPhotos] = useState([]);
@@ -31,6 +32,10 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
   const [selectedVisitId, setSelectedVisitId] = useState(null);
   const [editingReviewId, setEditingReviewId] = useState(null);
   const [reviewComposerExpanded, setReviewComposerExpanded] = useState(false);
+  const [reviewSearch, setReviewSearch] = useState('');
+  const [reviewSort, setReviewSort] = useState('newest');
+  const [reviewsWithPhotosOnly, setReviewsWithPhotosOnly] = useState(false);
+  const [photoGallery, setPhotoGallery] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [savingFavorite, setSavingFavorite] = useState(false);
@@ -265,6 +270,22 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   const canCompose = editingReviewId || reviewableVisits.length > 0;
   const selectedVisit = reviewableVisits.find((visit) => visit.checkin_id === selectedVisitId);
+  const visibleReviews = useMemo(() => {
+    const query = reviewSearch.trim().toLowerCase();
+    return reviews
+      .filter((review) => {
+        const matchesSearch = !query || `${review.author || ''} ${review.comment || ''}`.toLowerCase().includes(query);
+        const matchesFilter = !reviewsWithPhotosOnly
+          || (Array.isArray(review.photos) && review.photos.length > 0);
+        return matchesSearch && matchesFilter;
+      })
+      .sort((a, b) => {
+        if (reviewSort === 'highest') return (b.rating || 0) - (a.rating || 0);
+        if (reviewSort === 'lowest') return (a.rating || 0) - (b.rating || 0);
+        if (reviewSort === 'newest') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        return 0;
+      });
+  }, [reviews, reviewSearch, reviewSort, reviewsWithPhotosOnly]);
 
   return (
     <View style={[styles.container, { paddingHorizontal: 20, paddingTop: 40 }]}>
@@ -359,6 +380,36 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
         {/* Existing Guest Review Feeds — visible to everyone */}
         <Text style={styles.sectionHeading}>Gourmet Appraisals ({reviews.length})</Text>
+        {reviews.length > 0 ? (
+          <>
+            <View style={{ backgroundColor: '#121317', borderRadius: 14, borderWidth: 1, borderColor: '#252731', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={{ color: '#d2a14c', fontSize: 16, marginRight: 8 }}>⌕</Text>
+              <TextInput
+                value={reviewSearch}
+                onChangeText={setReviewSearch}
+                placeholder="Search food, service, atmosphere…"
+                placeholderTextColor="#68645e"
+                style={{ flex: 1, color: '#f8f0e9', height: 42, fontSize: 12 }}
+                returnKeyType="search"
+              />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>SORT</Text>
+                {[['newest', 'Newest'], ['highest', 'Highest Rated'], ['lowest', 'Lowest Rated']].map(([value, label]) => (
+                  <Pressable key={value} onPress={() => setReviewSort(value)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13 }, reviewSort === value && styles.badgeActive]}>
+                    <Text style={[styles.badgeLabel, reviewSort === value && styles.badgeLabelActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+                <View style={{ width: 1, height: 20, backgroundColor: '#303037', marginHorizontal: 3 }} />
+                <Text style={{ color: '#77736d', fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>FILTER</Text>
+                <Pressable onPress={() => setReviewsWithPhotosOnly((enabled) => !enabled)} style={[styles.badge, { paddingVertical: 8, paddingHorizontal: 13 }, reviewsWithPhotosOnly && styles.badgeActive]}>
+                  <Text style={[styles.badgeLabel, reviewsWithPhotosOnly && styles.badgeLabelActive]}>Photos</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </>
+        ) : null}
         {loadingReviews ? (
           <View style={{ gap: 12 }}>
             {Array.from({ length: 3 }).map((_, i) => (
@@ -368,23 +419,37 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         ) : reviews.length === 0 ? (
           <EmptyState icon="💬" title="No Reviews Yet" description="Complete a verified visit to unlock your review slot and be the first to share your dining experience." onAction={loadReviews} actionLabel="Check Review Eligibility" />
         ) : (
-          reviews.map((r) => {
+          visibleReviews.length === 0 ? (
+            <Text style={{ color: '#8e8982', fontSize: 13, textAlign: 'center', paddingVertical: 24 }}>No reviews match your search.</Text>
+          ) : visibleReviews.map((r) => {
             const isOwn = currentUser && r.user_id === currentUser.id;
             return (
-              <View key={r.id} style={[styles.restaurantCard, { borderColor: '#252731', marginBottom: 12 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ color: '#d2a14c', fontWeight: '700' }}>{r.author}</Text>
-                  <Text style={{ color: '#6b6b70', fontSize: 11 }}>{formatDate(r.created_at)}</Text>
+              <View key={r.id} style={[styles.restaurantCard, { borderColor: '#29251f', marginBottom: 14, padding: 18, borderRadius: 20 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: '#2a2115', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                    <Text style={{ color: '#d2a14c', fontSize: 14, fontWeight: '800' }}>{(r.author || 'G').charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                      <Text style={{ color: '#f4eee5', fontWeight: '700', fontSize: 14 }}>{r.author || 'Guest'}</Text>
+                      {isOwn ? <Text style={{ color: '#d2a14c', fontSize: 10, fontWeight: '700' }}>YOUR REVIEW</Text> : null}
+                    </View>
+                    <Text style={{ color: '#77736d', fontSize: 11, marginTop: 2 }}>{formatDate(r.created_at)}</Text>
+                  </View>
                 </View>
-                <Text style={{ color: '#d2a14c', fontSize: 13, marginBottom: 6 }}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</Text>
-                <Text style={{ color: '#f8f0e9', fontSize: 13, lineHeight: 18, marginBottom: 8 }}>{r.comment}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ color: '#d2a14c', fontSize: 15, letterSpacing: 1 }}>{'★'.repeat(r.rating || 0)}{'☆'.repeat(Math.max(0, 5 - (r.rating || 0)))}</Text>
+                </View>
+                <Text style={{ color: '#f8f0e9', fontSize: 14, lineHeight: 21, marginBottom: 12 }}>{r.comment}</Text>
 
                 {r.photos && r.photos.length > 0 ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
                       {r.photos.map((p) => (
-                        <View key={p.id} style={{ width: 72 }}>
-                          <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 10 }} resizeMode="cover" />
+                        <View key={p.id} style={{ width: 82 }}>
+                          <Pressable onPress={() => setPhotoGallery({ photos: r.photos, index: r.photos.indexOf(p) })}>
+                            <Image source={{ uri: p.url }} style={{ width: 82, height: 82, borderRadius: 12 }} resizeMode="cover" />
+                          </Pressable>
                           {p.label ? (
                             <Text style={{ color: '#aea9a1', fontSize: 10, marginTop: 2 }} numberOfLines={1}>{p.label}</Text>
                           ) : null}
@@ -394,7 +459,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
                   </ScrollView>
                 ) : null}
 
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#24242a' }}>
                   <View style={{ flexDirection: 'row', gap: 16 }}>
                     {isOwn && (
                       <>
@@ -532,6 +597,30 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
           </View>
         )}
       </ScrollView>
+      <Modal visible={Boolean(photoGallery)} transparent animationType="fade" onRequestClose={() => setPhotoGallery(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(5, 5, 8, 0.98)', justifyContent: 'center' }}>
+          <Pressable onPress={() => setPhotoGallery(null)} style={{ position: 'absolute', top: 54, right: 22, zIndex: 2, width: 38, height: 38, borderRadius: 19, backgroundColor: '#202126', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#f8f0e9', fontSize: 20 }}>×</Text>
+          </Pressable>
+          {photoGallery ? (
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              contentOffset={{ x: photoGallery.index * screenWidth, y: 0 }}
+              style={{ flexGrow: 0, maxHeight: screenHeight - 150 }}
+            >
+              {photoGallery.photos.map((photo, index) => (
+                <View key={`${photo.url}-${index}`} style={{ width: screenWidth, alignItems: 'center', justifyContent: 'center' }}>
+                  <Image source={{ uri: photo.url }} style={{ width: screenWidth - 40, height: Math.min(screenWidth - 40, screenHeight - 220), borderRadius: 16 }} resizeMode="contain" />
+                  {photo.label ? <Text style={{ color: '#d8d0c5', fontSize: 12, marginTop: 14 }}>{photo.label}</Text> : null}
+                </View>
+              ))}
+            </ScrollView>
+          ) : null}
+          {photoGallery ? <Text style={{ color: '#77736d', textAlign: 'center', fontSize: 11, marginTop: 20 }}>{photoGallery.index + 1} / {photoGallery.photos.length}</Text> : null}
+        </View>
+      </Modal>
     </View>
   );
 }
