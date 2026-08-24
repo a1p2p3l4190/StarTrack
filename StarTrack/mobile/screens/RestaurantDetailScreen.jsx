@@ -30,6 +30,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
   const [reviewableVisits, setReviewableVisits] = useState([]);
   const [selectedVisitId, setSelectedVisitId] = useState(null);
   const [editingReviewId, setEditingReviewId] = useState(null);
+  const [reviewComposerExpanded, setReviewComposerExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [savingFavorite, setSavingFavorite] = useState(false);
@@ -98,10 +99,12 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
     setRating(5);
     setPhotos([]);
     setEditingReviewId(null);
+    setReviewComposerExpanded(false);
   };
 
   const startEditing = (review) => {
     setEditingReviewId(review.id);
+    setReviewComposerExpanded(true);
     setComment(review.comment);
     setRating(review.rating || 5);
     setPhotos((review.photos || []).map((p) => ({ url: p.url, label: p.label || '' })));
@@ -261,6 +264,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
   };
 
   const canCompose = editingReviewId || reviewableVisits.length > 0;
+  const selectedVisit = reviewableVisits.find((visit) => visit.checkin_id === selectedVisitId);
 
   return (
     <View style={[styles.container, { paddingHorizontal: 20, paddingTop: 40 }]}>
@@ -413,22 +417,40 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         )}
 
         {/* Review composer — one unreviewed verified visit unlocks one slot */}
-        <Text style={[styles.sectionHeading, { marginTop: 20 }]}>
-          {editingReviewId ? 'Edit Your Appraisal' : 'Write An Appraisal'}
-        </Text>
+        <Pressable
+          onPress={() => canCompose && setReviewComposerExpanded((expanded) => !expanded)}
+          disabled={!canCompose}
+          style={[styles.splitterCard, { marginTop: 20, marginBottom: canCompose && reviewComposerExpanded ? 0 : 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionHeading, { marginTop: 0, marginBottom: 4 }]}>
+              {editingReviewId ? 'Edit Your Appraisal' : 'Write An Appraisal'}
+            </Text>
+            <Text style={{ color: canCompose ? '#aaa39a' : '#6b6b70', fontSize: 12 }}>
+              {editingReviewId
+                ? 'Update your experience'
+                : reviewableVisits.length > 0
+                  ? `${reviewableVisits.length} visit${reviewableVisits.length === 1 ? '' : 's'} awaiting review`
+                  : 'A verified visit is required'}
+            </Text>
+          </View>
+          <Text style={{ color: canCompose ? '#d2a14c' : '#6b6b70', fontSize: 22 }}>
+            {canCompose && reviewComposerExpanded ? '⌃' : '⌄'}
+          </Text>
+        </Pressable>
         {canCompose ? (
-          <View style={styles.splitterCard}>
-            {!editingReviewId && reviewableVisits.length > 1 && (
+          reviewComposerExpanded ? <View style={[styles.splitterCard, { borderTopLeftRadius: 0, borderTopRightRadius: 0 }]}>
+            {!editingReviewId && (
               <>
-                <Text style={[styles.inputLabel, { color: '#d2a14c' }]}>Which Visit?</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <Text style={[styles.inputLabel, { color: '#d2a14c' }]}>Select your visit</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
                   {reviewableVisits.map((v) => (
                     <Pressable
                       key={v.checkin_id}
                       onPress={() => setSelectedVisitId(v.checkin_id)}
-                      style={[styles.badge, selectedVisitId === v.checkin_id && styles.badgeActive]}
+                      style={[styles.badge, { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14 }, selectedVisitId === v.checkin_id && styles.badgeActive]}
                     >
-                      <Text style={[styles.badgeLabel, selectedVisitId === v.checkin_id && styles.badgeLabelActive]}>
+                      <Text style={[styles.badgeLabel, { letterSpacing: 0.3 }, selectedVisitId === v.checkin_id && styles.badgeLabelActive]}>
                         {formatDate(v.verified_at)}
                       </Text>
                     </Pressable>
@@ -437,17 +459,20 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
               </>
             )}
 
-            <Text style={[styles.inputLabel, { color: '#d2a14c' }]}>Appraisal Commentary</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={[styles.inputLabel, { color: '#d2a14c', marginBottom: 0 }]}>Your experience</Text>
+              {selectedVisit ? <Text style={{ color: '#6b6b70', fontSize: 11 }}>Verified check-in</Text> : null}
+            </View>
             <TextInput
               style={[styles.input, { height: 70, paddingTop: 10, marginBottom: 12 }]}
               multiline
-              placeholder="Describe tasting progression notes, service elegance..."
+              placeholder="Tell us about the food, service, and atmosphere…"
               placeholderTextColor="#555"
               value={comment}
               onChangeText={setComment}
             />
 
-            <Text style={styles.inputLabel}>Rating For This Visit</Text>
+            <Text style={styles.inputLabel}>Your rating</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginBottom: 16 }}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <Pressable key={star} onPress={() => setRating(star)} hitSlop={6}>
@@ -456,7 +481,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
               ))}
             </View>
 
-            <Text style={styles.inputLabel}>Photos ({photos.length})</Text>
+            <Text style={styles.inputLabel}>Add photos ({photos.length})</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
               <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
                 {photos.map((p, i) => (
@@ -490,7 +515,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
               {submitting ? (
                 <ActivityIndicator color="#09090d" />
               ) : (
-                <Text style={styles.copyShareButtonText}>{editingReviewId ? 'Save Changes' : 'Publish Premium Review'}</Text>
+                <Text style={styles.copyShareButtonText}>{editingReviewId ? 'Save Changes' : 'Publish Review'}</Text>
               )}
             </Pressable>
             {editingReviewId && (
@@ -498,7 +523,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
                 <Text style={{ color: '#8e8982', fontSize: 12 }}>Cancel Edit</Text>
               </Pressable>
             )}
-          </View>
+          </View> : null
         ) : (
           <View style={[styles.statusIndicatorBar, { backgroundColor: '#141311', borderColor: '#2a2215', padding: 16 }]}>
             <Text style={{ color: '#8e8982', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
