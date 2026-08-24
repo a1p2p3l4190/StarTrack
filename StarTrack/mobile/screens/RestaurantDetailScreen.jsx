@@ -260,27 +260,25 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   return (
     <View style={[styles.container, { paddingHorizontal: 20, paddingTop: 40 }]}>
-      {/* Detail View Header */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 12 }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{restaurant.cuisine.toUpperCase()}</Text>
-          <Text style={styles.title} numberOfLines={3} ellipsizeMode="tail">{restaurant.name}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
-          <Pressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
-            <Text style={{ color: isSaved ? '#7ce8b4' : '#f8f0e9', fontWeight: '700' }}>{savingFavorite ? '...' : (isSaved ? 'Saved' : 'Save')}</Text>
-          </Pressable>
-          <Pressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
-            <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
-          </Pressable>
-        </View>
-      </View>
-
       <ScrollView showsVerticalScrollIndicator={false}>
         {restaurant.photo_url ? (
-          <Image source={{ uri: restaurant.photo_url }} style={{ width: '100%', height: 170, borderRadius: 12, marginBottom: 12 }} resizeMode="cover" />
+          <Image source={{ uri: restaurant.photo_url }} style={{ width: '100%', height: 210, borderRadius: 18, marginBottom: 18 }} resizeMode="cover" />
         ) : null}
-        <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 8 }]}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{restaurant.cuisine.toUpperCase()}</Text>
+            <Text style={styles.title} numberOfLines={3} ellipsizeMode="tail">{restaurant.name}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
+            <Pressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
+              <Text style={{ color: isSaved ? '#7ce8b4' : '#f8f0e9', fontWeight: '700' }}>{savingFavorite ? '...' : (isSaved ? 'Saved' : 'Save')}</Text>
+            </Pressable>
+            <Pressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
+              <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+        <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 8 }]}> 
           📍 {restaurant.city}, {restaurant.country} · Released: {restaurant.year || restaurant.year_awarded || '—'} · Tier: {'★'.repeat(restaurant.stars)}
         </Text>
         {restaurant.review_count > 0 ? (

@@ -31,10 +31,10 @@ export const styles = StyleSheet.create({
   },
   sectionHeading: {
     color: '#f7e8d3',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 1,
-    marginBottom: 12,
+    letterSpacing: 0.8,
+    marginBottom: 14,
     textTransform: 'uppercase',
   },
   brandGold: {
@@ -165,11 +165,16 @@ export const styles = StyleSheet.create({
   },
   restaurantCard: {
     backgroundColor: '#121317',
-    borderRadius: 18,
-    padding: 12,
+    borderRadius: 20,
+    padding: 14,
     borderWidth: 1,
-    borderColor: '#1d1e24',
+    borderColor: '#252731',
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 3,
   },
   restaurantCardSelected: {
     borderColor: '#d2a14c',
@@ -214,8 +219,9 @@ export const styles = StyleSheet.create({
   },
   restaurantName: {
     color: '#f8f0e9',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
+    letterSpacing: 0.1,
   },
   starRating: {
     color: '#d2a14c',
@@ -224,7 +230,8 @@ export const styles = StyleSheet.create({
   },
   restaurantMeta: {
     color: '#8e8982',
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 18,
   },
   restaurantInfoRow: {
     flexDirection: 'row',
