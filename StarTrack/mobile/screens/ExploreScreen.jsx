@@ -7,6 +7,7 @@ import { deriveFilterOptions, isRestaurantOpen } from '../utils';
 import Badge from '../components/Badge';
 import Dropdown from '../components/Dropdown';
 import AppIcon from '../components/AppIcon';
+import RestaurantPlaceholder from '../components/RestaurantPlaceholder';
 import RestaurantMap from '../components/RestaurantMap';
 import RestaurantListSkeleton from '../components/Shimmer';
 import { EmptyState } from '../components/ErrorDisplay';
@@ -180,9 +181,7 @@ export default function ExploreScreen({
                 {restaurant.photo_url ? (
                   <Image source={{ uri: restaurant.photo_url }} style={styles.restaurantCardImage} resizeMode="cover" />
                 ) : (
-                  <View style={styles.restaurantCardImagePlaceholder}>
-                    <Text style={styles.restaurantCardImagePlaceholderText}>★</Text>
-                  </View>
+                  <RestaurantPlaceholder name={restaurant.name} style={styles.restaurantCardImagePlaceholder} />
                 )}
 
                 <View style={[styles.restaurantCardBody, { minWidth: 0 }]}>

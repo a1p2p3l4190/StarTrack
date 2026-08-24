@@ -7,6 +7,7 @@ import { isRestaurantOpen, formatHoursEntry, summarizeTodayHours } from '../util
 import { pickImages, uploadImages } from '../photoStorage';
 import { ReviewCardSkeleton } from '../components/Shimmer';
 import { ErrorMessage, Toast, EmptyState } from '../components/ErrorDisplay';
+import RestaurantPlaceholder from '../components/RestaurantPlaceholder';
 
 const formatDate = (iso) => new Date(iso).toISOString().split('T')[0];
 
@@ -263,7 +264,9 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
       <ScrollView showsVerticalScrollIndicator={false}>
         {restaurant.photo_url ? (
           <Image source={{ uri: restaurant.photo_url }} style={{ width: '100%', height: 210, borderRadius: 18, marginBottom: 18 }} resizeMode="cover" />
-        ) : null}
+        ) : (
+          <RestaurantPlaceholder name={restaurant.name} style={{ width: '100%', height: 210, borderRadius: 18, marginBottom: 18 }} />
+        )}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{restaurant.cuisine.toUpperCase()}</Text>

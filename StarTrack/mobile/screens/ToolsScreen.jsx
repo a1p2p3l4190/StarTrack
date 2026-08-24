@@ -6,6 +6,7 @@ import { api } from '../api';
 import { scheduleReservationReleaseReminder } from '../reminderScheduler';
 import { cancelNotification } from '../notificationService';
 import StarMap from '../components/StarMap';
+import RestaurantPlaceholder from '../components/RestaurantPlaceholder';
 
 export default function ToolsScreen({
   total, setTotal, tax, setTax, tip, setTip, people, setPeople, billDetails, onSharePress, restaurants = [], onOpenPassport, onExplore, onOpenDetail, checkinHistory = {}, currentUser
@@ -223,7 +224,7 @@ export default function ToolsScreen({
                           {item.photo_url ? (
                             <Image source={{ uri: item.photo_url }} style={styles.wishImage} resizeMode="cover" />
                           ) : (
-                            <View style={styles.wishImagePlaceholder}><Text style={styles.wishImagePlaceholderText}>★</Text></View>
+                            <RestaurantPlaceholder name={item.restaurant_name} style={styles.wishImagePlaceholder} />
                           )}
                           <View style={styles.wishContent}>
                             <Text style={styles.wishName}>{item.restaurant_name}</Text>
