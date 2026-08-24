@@ -497,6 +497,7 @@ export default function App() {
         <RestaurantDetailScreen
           restaurant={detailTarget}
           currentUser={currentUser}
+          onSavedChanged={refreshWishlist}
           onClose={() => setDetailTarget(null)}
         />
       </View>

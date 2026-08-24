@@ -8,6 +8,7 @@ import { pickImages, uploadImages } from '../photoStorage';
 import { ReviewCardSkeleton } from '../components/Shimmer';
 import { ErrorMessage, Toast, EmptyState } from '../components/ErrorDisplay';
 import RestaurantPlaceholder from '../components/RestaurantPlaceholder';
+import InteractivePressable from '../components/InteractivePressable';
 
 const formatDate = (iso) => new Date(iso).toISOString().split('T')[0];
 
@@ -19,7 +20,7 @@ const RESERVATION_PLATFORM_META = {
 
 const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function RestaurantDetailScreen({ restaurant, currentUser, onClose }) {
+export default function RestaurantDetailScreen({ restaurant, currentUser, onClose, onSavedChanged }) {
   const [comment, setComment] = useState('');
   const [rating, setRating] = useState(5);
   const [photos, setPhotos] = useState([]);
@@ -229,6 +230,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
       if (existing) {
         await api.removeWishlist(existing.id);
         setIsSaved(false);
+        await onSavedChanged?.();
       } else {
         await api.addWishlist({
           restaurant_id: restaurant.id,
@@ -239,6 +241,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
           note: 'Saved from StarTrack',
         });
         setIsSaved(true);
+        await onSavedChanged?.();
       }
     } catch (err) {
       Alert.alert('Could not update saved restaurant', err.message);
@@ -273,12 +276,12 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
             <Text style={styles.title} numberOfLines={3} ellipsizeMode="tail">{restaurant.name}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
-            <Pressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
+            <InteractivePressable onPress={toggleFavorite} disabled={savingFavorite} style={[styles.badge, { backgroundColor: isSaved ? '#264b39' : '#1e1f26' }]}>
               <Text style={{ color: isSaved ? '#7ce8b4' : '#f8f0e9', fontWeight: '700' }}>{savingFavorite ? '...' : (isSaved ? 'Saved' : 'Save')}</Text>
-            </Pressable>
-            <Pressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
+            </InteractivePressable>
+            <InteractivePressable onPress={onClose} style={[styles.badge, { backgroundColor: '#1e1f26' }]}>
               <Text style={{ color: '#ff6b6b', fontWeight: '700' }}>Close</Text>
-            </Pressable>
+            </InteractivePressable>
           </View>
         </View>
         <Text style={[styles.restaurantMeta, { fontSize: 15, marginBottom: 8 }]}> 
@@ -294,14 +297,14 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         </View>
 
         <View style={[styles.splitterCard, { padding: 0, marginBottom: 16, overflow: 'hidden' }]}>
-          <Pressable onPress={() => setHoursExpanded((expanded) => !expanded)} style={{ padding: 16 }}>
+          <InteractivePressable onPress={() => setHoursExpanded((expanded) => !expanded)} style={{ padding: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: currentlyOpen ? '#18c89a' : '#ff6b6b', marginRight: 12, shadowColor: currentlyOpen ? '#18c89a' : '#ff6b6b', shadowOpacity: 0.6, shadowRadius: 5 }} />
               <Text style={{ color: currentlyOpen ? '#7ce8b4' : '#ff8585', fontSize: 16, fontWeight: '800' }}>{currentlyOpen ? 'Open now' : 'Closed'}</Text>
               <Text numberOfLines={1} style={{ color: '#8e8982', fontSize: 14, marginLeft: 12, flex: 1 }}>{todayHours ? formatHoursEntry(todayHours) : 'Hours unavailable'}</Text>
               <Text style={{ color: '#f3e8d8', fontSize: 24, lineHeight: 22 }}>{hoursExpanded ? '⌃' : '⌄'}</Text>
             </View>
-          </Pressable>
+          </InteractivePressable>
           {hoursExpanded && (
             <View style={{ borderTopWidth: 1, borderTopColor: '#292c34', paddingHorizontal: 16, paddingBottom: 10 }}>
               {WEEK_DAYS.map((day, index) => {
@@ -342,12 +345,12 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         )}
 
         {restaurant.reservation_url ? (
-          <Pressable style={[styles.copyShareButton, { marginBottom: 20 }]} onPress={openReservationLink}>
+          <InteractivePressable style={[styles.copyShareButton, { marginBottom: 20 }]} onPress={openReservationLink}>
             <Text style={styles.copyShareButtonText}>
               {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).icon}{' '}
               {(RESERVATION_PLATFORM_META[restaurant.reservation_platform] || RESERVATION_PLATFORM_META.website).label}
             </Text>
-          </Pressable>
+          </InteractivePressable>
         ) : null}
 
         {/* Existing Guest Review Feeds — visible to everyone */}
