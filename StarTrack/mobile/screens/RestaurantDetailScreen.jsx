@@ -1,6 +1,6 @@
 // screens/RestaurantDetailScreen.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Keyboard, ActivityIndicator, Platform, Image, Alert, Linking, Modal, useWindowDimensions } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Keyboard, ActivityIndicator, Platform, Image, Alert, Linking, Modal, useWindowDimensions, LayoutAnimation, UIManager } from 'react-native';
 import { styles } from '../styles';
 import { api } from '../api';
 import { isRestaurantOpen, formatHoursEntry, summarizeTodayHours } from '../utils';
@@ -19,6 +19,10 @@ const RESERVATION_PLATFORM_META = {
 };
 
 const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export default function RestaurantDetailScreen({ restaurant, currentUser, onClose, onSavedChanged }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -270,6 +274,10 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   const canCompose = editingReviewId || reviewableVisits.length > 0;
   const selectedVisit = reviewableVisits.find((visit) => visit.checkin_id === selectedVisitId);
+  const toggleHours = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.create(260, 'easeInEaseOut', 'opacity'));
+    setHoursExpanded((expanded) => !expanded);
+  };
   const visibleReviews = useMemo(() => {
     const query = reviewSearch.trim().toLowerCase();
     return reviews
@@ -322,7 +330,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         </View>
 
         <View style={[styles.splitterCard, { padding: 0, marginBottom: 16, overflow: 'hidden' }]}>
-          <InteractivePressable onPress={() => setHoursExpanded((expanded) => !expanded)} style={{ padding: 16 }}>
+          <InteractivePressable onPress={toggleHours} style={{ padding: 16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: currentlyOpen ? '#18c89a' : '#ff6b6b', marginRight: 12, shadowColor: currentlyOpen ? '#18c89a' : '#ff6b6b', shadowOpacity: 0.6, shadowRadius: 5 }} />
               <Text style={{ color: currentlyOpen ? '#7ce8b4' : '#ff8585', fontSize: 16, fontWeight: '800' }}>{currentlyOpen ? 'Open now' : 'Closed'}</Text>
