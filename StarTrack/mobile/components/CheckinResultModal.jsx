@@ -3,7 +3,7 @@
 // results — same dark/gold card treatment as the badge detail modal on the
 // Passport screen, so a check-in outcome reads as part of the same app
 // instead of a bare OS dialog.
-import React from 'react';
+import React, { useRef } from 'react';
 import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { styles } from '../styles';
 import BadgeUnlockReveal from './BadgeUnlockReveal';
@@ -17,9 +17,20 @@ const KIND_META = {
   too_far: { icon: '🔒', color: '#e8b23d', title: 'Check-in Locked' },
 };
 
-export default function CheckinResultModal({ visible, kind = 'error', action, message, badges, restaurantName, scanning = false, onDismiss, onPrimary }) {
-  const meta = KIND_META[kind] || KIND_META.error;
-  const primaryLabel = kind === 'success' ? 'View My Passport' : action === 'open_settings' ? 'Open Settings' : 'Try Again';
+export default function CheckinResultModal({ visible, kind, action, message, badges, restaurantName, scanning = false, onDismiss, onPrimary }) {
+  // Dismissing clears the parent's result state, which sends kind/message/etc
+  // to undefined in the same render that visible flips to false. RN's Modal
+  // keeps rendering children while it fades the overlay out, so without this
+  // freeze the modal would flash its *defaulted* content (kind 'error' ->
+  // "Check-in Failed") during the fade instead of gracefully fading out
+  // whatever it was actually last showing.
+  const lastContentRef = useRef({ kind: 'error', action, message, badges, restaurantName });
+  if (visible) {
+    lastContentRef.current = { kind: kind || 'error', action, message, badges, restaurantName };
+  }
+  const content = lastContentRef.current;
+  const meta = KIND_META[content.kind] || KIND_META.error;
+  const primaryLabel = content.kind === 'success' ? 'View My Passport' : content.action === 'open_settings' ? 'Open Settings' : 'Try Again';
 
   return (
     <Modal visible={visible || scanning} transparent animationType="fade" onRequestClose={scanning ? undefined : onDismiss}>
@@ -38,12 +49,12 @@ export default function CheckinResultModal({ visible, kind = 'error', action, me
             {meta.title}
           </Text>
           <Text style={{ color: '#aeaea1', textAlign: 'center', fontSize: 13, lineHeight: 19 }}>
-            {message}
+            {content.message}
           </Text>
 
-          <BadgeUnlockReveal badges={badges} />
+          <BadgeUnlockReveal badges={content.badges} />
 
-          {kind === 'success' && (
+          {content.kind === 'success' && (
             <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 14 }}>
               Next step: write your review within 7 days.
             </Text>
@@ -55,7 +66,7 @@ export default function CheckinResultModal({ visible, kind = 'error', action, me
           >
             <Text style={styles.copyShareButtonText}>{primaryLabel}</Text>
           </Pressable>
-          {kind !== 'success' && (
+          {content.kind !== 'success' && (
             <Pressable onPress={onDismiss} style={{ marginTop: 12, padding: 6 }}>
               <Text style={{ color: '#8e8982', fontSize: 12, fontWeight: '700' }}>Close</Text>
             </Pressable>
