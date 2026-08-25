@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Alert, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Alert, ScrollView, Image, ActivityIndicator, Platform } from 'react-native';
 import { styles } from '../styles';
 import { api, setAuthToken } from '../api';
 import { pickAvatar, uploadAvatarImage } from '../avatarStorage';
@@ -38,12 +38,17 @@ export default function ProfileScreen({ currentUser, onUserUpdated, onLogout }) 
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const confirmLogout = () => {
+    const logout = async () => {
+      await setAuthToken(null);
+      onLogout?.();
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to log out?')) logout();
+      return;
+    }
     Alert.alert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: async () => {
-        await setAuthToken(null);
-        onLogout?.();
-      } },
+      { text: 'Log out', style: 'destructive', onPress: logout },
     ]);
   };
   const [regionMenuOpen, setRegionMenuOpen] = useState(false);

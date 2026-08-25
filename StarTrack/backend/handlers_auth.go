@@ -47,7 +47,7 @@ func registerHandler(cfg *Config) gin.HandlerFunc {
 
 		email := strings.ToLower(strings.TrimSpace(req.Email))
 		var existing User
-		if err := db.Where("email = ?", email).First(&existing).Error; err == nil {
+		if err := db.Where("LOWER(email) = ?", email).First(&existing).Error; err == nil {
 			RespondConflict(c, "An account with that email already exists")
 			return
 		}
@@ -68,6 +68,12 @@ func registerHandler(cfg *Config) gin.HandlerFunc {
 			EmailVerificationToken: generateSecureToken(),
 		}
 		if err := db.Create(&user).Error; err != nil {
+			// Keep the API consistent if two registration requests race each
+			// other and the database unique constraint wins after the pre-check.
+			if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+				RespondConflict(c, "An account with that email already exists")
+				return
+			}
 			RespondInternalError(c, "Failed to create account")
 			return
 		}
