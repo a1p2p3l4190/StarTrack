@@ -9,6 +9,19 @@ function directoryFor(kind) {
   return `${FileSystem.documentDirectory}${kind}/`;
 }
 
+// On native, the picker's file:// uri is fine (copied into local storage
+// below). On web there's no filesystem to copy from, and the picker's uri
+// is actually a blob: URL — valid only for this page load, so it 404s the
+// instant the page refreshes. Requesting base64 there and building a
+// self-contained data: URI is what keeps the photo alive across reloads
+// (and in the DB) when no cloud upload key is configured.
+function assetToUri(asset) {
+  if (Platform.OS === 'web' && asset.base64) {
+    return `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
+  }
+  return asset.uri;
+}
+
 async function ensureDirectory(dir) {
   const dirInfo = await FileSystem.getInfoAsync(dir);
   if (!dirInfo.exists) {
@@ -27,13 +40,14 @@ export async function pickImage({ aspect } = {}) {
     allowsEditing: true,
     aspect,
     quality: 0.82,
+    base64: Platform.OS === 'web',
   });
 
   if (result.canceled || !result.assets?.[0]?.uri) {
     return null;
   }
 
-  return result.assets[0].uri;
+  return assetToUri(result.assets[0]);
 }
 
 // Picks any number of images at once (up to selectionLimit). Multi-select
@@ -50,13 +64,14 @@ export async function pickImages({ selectionLimit = 6 } = {}) {
     allowsMultipleSelection: true,
     selectionLimit,
     quality: 0.82,
+    base64: Platform.OS === 'web',
   });
 
   if (result.canceled || !result.assets?.length) {
     return [];
   }
 
-  return result.assets.map((asset) => asset.uri);
+  return result.assets.map(assetToUri);
 }
 
 export async function saveImageLocally(uri, kind, id = 'item') {
