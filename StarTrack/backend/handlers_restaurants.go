@@ -122,6 +122,16 @@ func migrateRestaurantStarHistory() error {
 		return nil
 	}
 
+	// The legacy "stars" column was NOT NULL. GORM never drops or alters
+	// columns it no longer manages, so it's still sitting there enforcing
+	// that constraint against inserts that no longer supply it — every
+	// createRestaurantHandler/importRestaurantsHandler call would 500.
+	// Relaxing it is additive (widens what's allowed) and safe to run every
+	// startup; Postgres no-ops a DROP NOT NULL on an already-nullable column.
+	if err := db.Exec(`ALTER TABLE restaurants ALTER COLUMN stars DROP NOT NULL`).Error; err != nil {
+		return fmt.Errorf("failed to relax legacy stars NOT NULL constraint: %w", err)
+	}
+
 	type legacyRestaurantStars struct {
 		ID          uint
 		Stars       int
@@ -210,7 +220,15 @@ func hydrateIsOpen(restaurants []Restaurant) {
 		ids[i] = r.ID
 	}
 
-	today := int(time.Now().Weekday())
+	// Restaurant availability is currently based in Chicago. Do not use the
+	// cloud server's timezone (often UTC), otherwise the list can disagree
+	// with the detail screen and show a venue as closed while it is open.
+	location, err := time.LoadLocation("America/Chicago")
+	if err != nil {
+		location = time.FixedZone("America/Chicago", -6*60*60)
+	}
+	localNow := time.Now().In(location)
+	today := int(localNow.Weekday())
 	var todayHours []RestaurantHours
 	db.Where("restaurant_id IN ? AND day_of_week = ?", ids, today).Find(&todayHours)
 
@@ -219,7 +237,7 @@ func hydrateIsOpen(restaurants []Restaurant) {
 		byRestaurant[h.RestaurantID] = h
 	}
 
-	now := hourMinutes(time.Now().Format("15:04"))
+	now := hourMinutes(localNow.Format("15:04"))
 	for i := range restaurants {
 		entry, ok := byRestaurant[restaurants[i].ID]
 		open := false
@@ -311,7 +329,9 @@ func listRestaurantsHandler(c *gin.Context) {
 
 	limitStr := c.Query("limit")
 	if limitStr == "" {
-		query.Find(&restaurants)
+		query.Preload("Hours", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day_of_week")
+		}).Find(&restaurants)
 		hydrateCurrentStarSnapshots(restaurants)
 		hydrateNextRelease(restaurants)
 		hydrateRatings(restaurants)
@@ -331,7 +351,9 @@ func listRestaurantsHandler(c *gin.Context) {
 
 	var total int64
 	query.Model(&Restaurant{}).Count(&total)
-	query.Offset((page - 1) * limit).Limit(limit).Find(&restaurants)
+	query.Preload("Hours", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day_of_week")
+	}).Offset((page - 1) * limit).Limit(limit).Find(&restaurants)
 	hydrateCurrentStarSnapshots(restaurants)
 	hydrateNextRelease(restaurants)
 	hydrateRatings(restaurants)

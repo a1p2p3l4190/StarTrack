@@ -205,7 +205,7 @@ export default function ExploreScreen({
 
                   <View style={styles.restaurantInfoRow}>
                     <Text style={styles.restaurantInfoPill}>{restaurant.price_tier ? '💰'.repeat(restaurant.price_tier) : 'Price N/A'}</Text>
-                    <Text style={styles.restaurantInfoPill}>{isRestaurantOpen(restaurant) ? '🟢 Open now' : '⚪ Closed'}</Text>
+                    <Text style={styles.restaurantInfoPill}>{isRestaurantOpen(restaurant.hours?.length ? { ...restaurant, is_open: undefined } : restaurant) ? '🟢 Open now' : '⚪ Closed'}</Text>
                     <Text style={styles.restaurantInfoPill}>{restaurant.distance_km != null ? `${restaurant.distance_km < 1 ? Math.round(restaurant.distance_km * 1000) + ' m' : restaurant.distance_km.toFixed(1) + ' km'}` : 'Distance unavailable'}</Text>
                   </View>
                 </View>

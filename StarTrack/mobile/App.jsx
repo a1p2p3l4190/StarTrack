@@ -1,7 +1,7 @@
 // App.jsx
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Clipboard, Platform, ScrollView, Text, View, Pressable } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Clipboard, Linking, Platform, ScrollView, Text, View, Pressable } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import NetInfo from '@react-native-community/netinfo';
 import * as SecureStore from 'expo-secure-store';
@@ -12,6 +12,7 @@ import { styles } from './styles';
 import { computeBillDetails, filterRestaurants, sortRestaurants, computeCuisineBreakdown, computeStarBreakdown, mapCheckinMessage, distanceBetweenKm, summarizeTodayHours } from './utils';
 import { initializePushNotifications, onNotificationReceived, onNotificationTapped } from './notificationService';
 import CheckinResultModal from './components/CheckinResultModal';
+import CheckinConfirmModal from './components/CheckinConfirmModal';
 import AppIcon from './components/AppIcon';
 
 const CHECKIN_RADIUS_KM = 0.2;
@@ -26,6 +27,37 @@ import RestaurantDetailScreen from './screens/RestaurantDetailScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 
 const ONBOARDING_KEY = 'startrack_onboarding_completed';
+const LOCATION_FETCH_TIMEOUT_MS = 10000;
+
+// A cold GPS fix (or a hung native call) can otherwise leave
+// getCurrentPositionAsync pending forever with no feedback to the user —
+// this races it against a timeout so a caller always gets a resolve/reject
+// within LOCATION_FETCH_TIMEOUT_MS. The thrown error's `code` lets callers
+// show a message that matches the actual failure instead of one generic
+// "location needed" for every case (permission denied vs GPS unavailable
+// vs a real device that never got a fix in time all mean different fixes).
+async function fetchCurrentLocationOrThrow() {
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (permission.status !== 'granted') {
+    throw Object.assign(new Error('Location permission was not granted'), { code: 'permission_denied' });
+  }
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(Object.assign(new Error('Location request timed out'), { code: 'timeout' })), LOCATION_FETCH_TIMEOUT_MS);
+  });
+
+  let position;
+  try {
+    position = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      timeout,
+    ]);
+  } catch (err) {
+    if (err.code === 'timeout') throw err;
+    throw Object.assign(new Error(err.message), { code: 'unavailable' });
+  }
+  return { latitude: position.coords.latitude, longitude: position.coords.longitude };
+}
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -59,11 +91,18 @@ export default function App() {
   const [checkinHistory, setCheckinHistory] = useState({});
   const [scanning, setScanning] = useState(false);
   const [checkinResult, setCheckinResult] = useState(null);
+  const [checkinConfirmation, setCheckinConfirmation] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [pushToken, setPushToken] = useState(null);
   const contentScrollRef = useRef(null);
+
+  const openRestaurantDetail = (restaurant) => {
+    const restaurantId = restaurant?.id ?? restaurant?.restaurant_id;
+    if (!restaurantId) return;
+    setDetailTarget({ ...restaurant, id: restaurantId });
+  };
 
   useEffect(() => {
     // Each top-level destination starts at its own beginning instead of
@@ -126,18 +165,31 @@ export default function App() {
     refreshWishlist();
   }, [currentUser]);
 
+  // Background location fetch that populates distance badges/filters across
+  // the app — separate from the on-demand fetch in processVerificationIntent
+  // below, which retries at the moment the user actually taps check-in.
+  // This one only runs once on mount by itself; the AppState effect further
+  // down re-runs it whenever the app comes back to the foreground, so a
+  // permission/GPS fix the user makes while StarTrack is backgrounded (e.g.
+  // switching to Settings to turn location on) is picked up without forcing
+  // a full app restart.
+  const fetchBackgroundLocation = () => {
+    fetchCurrentLocationOrThrow()
+      .then(setUserLocation)
+      .catch((err) => console.warn('Location unavailable', err.code || err.message));
+  };
+
   useEffect(() => {
-    (async () => {
-      try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.status !== 'granted') return;
-        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setUserLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-      } catch (err) {
-        console.warn('Location unavailable', err.message);
-      }
-    })();
+    fetchBackgroundLocation();
   }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && !userLocation) fetchBackgroundLocation();
+    });
+    return () => subscription.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userLocation]);
 
   useEffect(() => {
     if (!userLocation) return;
@@ -146,6 +198,10 @@ export default function App() {
       distance_km: distanceBetweenKm(userLocation.latitude, userLocation.longitude, restaurant.location_lat, restaurant.location_long),
     })));
     setSelectedRestaurant((current) => current ? {
+      ...current,
+      distance_km: distanceBetweenKm(userLocation.latitude, userLocation.longitude, current.location_lat, current.location_long),
+    } : current);
+    setDetailTarget((current) => current ? {
       ...current,
       distance_km: distanceBetweenKm(userLocation.latitude, userLocation.longitude, current.location_lat, current.location_long),
     } : current);
@@ -370,12 +426,16 @@ export default function App() {
       });
 
       if (result.verified) {
-        await refreshCheckinData();
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         setCheckinResult({
           kind: 'success',
           message: `${result.message} at "${result.restaurant}". ${result.badge}. Your 7-day appraisal window is unlocked.`,
           badges: result.new_badges || [],
+        });
+        // A successful verification must not be turned into a failed check-in
+        // just because the follow-up Passport refresh is temporarily down.
+        await refreshCheckinData().catch((refreshError) => {
+          console.warn('Check-in succeeded but Passport refresh failed', refreshError.message);
         });
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -405,10 +465,39 @@ export default function App() {
     }
   }
 
-  const processVerificationIntent = () => {
-    if (!selectedRestaurant) return;
+  const processVerificationIntent = async (restaurantOverride = selectedRestaurant) => {
+    let targetRestaurant = restaurantOverride || selectedRestaurant;
+    if (!targetRestaurant) return;
     Haptics.selectionAsync().catch(() => {});
-    const distance = selectedRestaurant.distance_km;
+    let distance = targetRestaurant.distance_km;
+    if (!Number.isFinite(distance)) {
+      try {
+        const coords = await fetchCurrentLocationOrThrow();
+        distance = distanceBetweenKm(coords.latitude, coords.longitude, targetRestaurant.location_lat, targetRestaurant.location_long);
+        targetRestaurant = { ...targetRestaurant, distance_km: distance };
+        setUserLocation(coords);
+        setSelectedRestaurant((current) => current?.id === targetRestaurant.id ? targetRestaurant : current);
+        setDetailTarget((current) => current?.id === targetRestaurant.id ? targetRestaurant : current);
+      } catch (err) {
+        // Distinct messages per failure mode — "turn on location" isn't
+        // actionable when location IS on but permission for this app
+        // specifically was denied, or the GPS fix just timed out.
+        if (err.code === 'permission_denied') {
+          setCheckinResult({
+            kind: 'location',
+            action: Platform.OS === 'web' ? undefined : 'open_settings',
+            message: Platform.OS === 'web'
+              ? 'Location access for this site was denied. Allow it in your browser\'s site settings, then try again.'
+              : 'StarTrack doesn\'t have location permission. Tap below to open Settings and enable it, then come back and try again.',
+          });
+        } else if (err.code === 'timeout') {
+          setCheckinResult({ kind: 'location', message: 'Getting your location took too long — check your GPS signal and try again.' });
+        } else {
+          setCheckinResult({ kind: 'location', message: 'We could not get your current location. Please enable location access and try again.' });
+        }
+        return;
+      }
+    }
     if (!Number.isFinite(distance)) {
       setCheckinResult({ kind: 'location', message: 'Turn on location access so we can confirm that you are at the restaurant.' });
       return;
@@ -421,25 +510,23 @@ export default function App() {
       setCheckinResult({ kind: 'offline', message: "You're offline — reconnect to verify your check-in." });
       return;
     }
-    const confirmMessage = `Prepare to scan physical dining tag at "${selectedRestaurant.name}"?`;
+    setCheckinConfirmation(targetRestaurant);
+  };
 
-    // react-native-web's Alert.alert() is a no-op, so its buttons never fire
-    // there — fall back to window.confirm on web instead.
-    if (Platform.OS === 'web') {
-      if (window.confirm(confirmMessage)) {
-        performCheckIn(selectedRestaurant);
-      }
-      return;
+  // Shared onPrimary for both CheckinResultModal instances below: success
+  // routes to the Passport, a permission-denied location result opens the
+  // OS Settings app (retrying immediately would just get denied again),
+  // and everything else retries the check-in attempt.
+  const handleCheckinResultPrimary = (restaurantOverride) => {
+    const result = checkinResult;
+    setCheckinResult(null);
+    if (result?.kind === 'success') {
+      setCurrentTab('passport');
+    } else if (result?.action === 'open_settings') {
+      Linking.openSettings().catch(() => {});
+    } else {
+      processVerificationIntent(restaurantOverride);
     }
-
-    Alert.alert(
-      'Confirm NFC Session',
-      confirmMessage,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Begin Polling', onPress: () => performCheckIn(selectedRestaurant) }
-      ]
-    );
   };
 
   const handlePassportCellPress = (day, isVerified) => {
@@ -498,7 +585,29 @@ export default function App() {
           restaurant={detailTarget}
           currentUser={currentUser}
           onSavedChanged={refreshWishlist}
+          onCheckIn={() => processVerificationIntent(detailTarget)}
           onClose={() => setDetailTarget(null)}
+        />
+        <CheckinResultModal
+          visible={!!checkinResult}
+          kind={checkinResult?.kind}
+          action={checkinResult?.action}
+          message={checkinResult?.message}
+          badges={checkinResult?.badges}
+          restaurantName={detailTarget?.name}
+          scanning={scanning}
+          onDismiss={() => setCheckinResult(null)}
+          onPrimary={() => handleCheckinResultPrimary(detailTarget)}
+        />
+        <CheckinConfirmModal
+          visible={Boolean(checkinConfirmation)}
+          restaurantName={checkinConfirmation?.name}
+          onCancel={() => setCheckinConfirmation(null)}
+          onConfirm={() => {
+            const target = checkinConfirmation;
+            setCheckinConfirmation(null);
+            if (target) performCheckIn(target);
+          }}
         />
       </View>
     );
@@ -553,7 +662,7 @@ export default function App() {
             restaurantsLoading={restaurantsLoading && restaurants.length === 0}
             selectedRestaurant={selectedRestaurant} setSelectedRestaurant={setSelectedRestaurant}
             searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-            onOpenDetail={(r) => setDetailTarget(r)}
+            onOpenDetail={openRestaurantDetail}
             quickFilters={quickFilters} setQuickFilters={setQuickFilters}
             userLocation={userLocation} wishlistIds={wishlistIds}
             onToggleSaved={toggleRestaurantSaved}
@@ -570,7 +679,7 @@ export default function App() {
             restaurants={restaurants}
             onOpenPassport={() => setCurrentTab('passport')}
             onExplore={() => setCurrentTab('explore')}
-            onOpenDetail={(restaurant) => setDetailTarget(restaurant)}
+            onOpenDetail={openRestaurantDetail}
             checkinHistory={checkinHistory}
             currentUser={currentUser}
           />
@@ -604,22 +713,30 @@ export default function App() {
       <CheckinResultModal
         visible={!!checkinResult}
         kind={checkinResult?.kind}
+        action={checkinResult?.action}
         message={checkinResult?.message}
         badges={checkinResult?.badges}
         restaurantName={selectedRestaurant?.name}
         scanning={scanning}
         onDismiss={() => setCheckinResult(null)}
-        onPrimary={() => {
-          setCheckinResult(null);
-          if (checkinResult?.kind === 'success') setCurrentTab('passport');
-          else processVerificationIntent();
+        onPrimary={() => handleCheckinResultPrimary()}
+      />
+
+      <CheckinConfirmModal
+        visible={Boolean(checkinConfirmation)}
+        restaurantName={checkinConfirmation?.name}
+        onCancel={() => setCheckinConfirmation(null)}
+        onConfirm={() => {
+          const target = checkinConfirmation;
+          setCheckinConfirmation(null);
+          if (target) performCheckIn(target);
         }}
       />
 
       {selectedRestaurant && (
         <Pressable
           style={[styles.floatingNfcButton, (!Number.isFinite(selectedRestaurant.distance_km) || selectedRestaurant.distance_km > CHECKIN_RADIUS_KM) && styles.floatingNfcButtonLocked]}
-          onPress={processVerificationIntent}
+          onPress={() => processVerificationIntent()}
           disabled={scanning}
         >
           {scanning ? (

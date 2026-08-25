@@ -20,12 +20,13 @@ const RESERVATION_PLATFORM_META = {
 };
 
 const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const CHECKIN_RADIUS_KM = 0.2;
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export default function RestaurantDetailScreen({ restaurant, currentUser, onClose, onSavedChanged }) {
+export default function RestaurantDetailScreen({ restaurant, currentUser, onClose, onSavedChanged, onCheckIn }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [comment, setComment] = useState('');
   const [rating, setRating] = useState(5);
@@ -57,9 +58,12 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   const todayDayOfWeek = new Date().getDay();
   const todayHours = hours.find((h) => h.day_of_week === todayDayOfWeek);
-  const currentlyOpen = isRestaurantOpen({ ...restaurant, hours });
+  // Restaurant hours are local venue times. Prefer the device's local clock
+  // over the backend's cached `is_open` flag, which may be calculated in UTC.
+  const currentlyOpen = isRestaurantOpen({ ...restaurant, hours, is_open: undefined });
 
   useEffect(() => {
+    if (!restaurant?.id) return undefined;
     let cancelled = false;
     api.restaurant(restaurant.id)
       .then((full) => {
@@ -276,6 +280,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
 
   const canCompose = editingReviewId || reviewableVisits.length > 0;
   const selectedVisit = reviewableVisits.find((visit) => visit.checkin_id === selectedVisitId);
+  const canCheckIn = Number.isFinite(restaurant?.distance_km) && restaurant.distance_km <= CHECKIN_RADIUS_KM;
   const toggleHours = () => {
     LayoutAnimation.configureNext(LayoutAnimation.create(260, 'easeInEaseOut', 'opacity'));
     setHoursExpanded((expanded) => !expanded);
@@ -307,7 +312,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         )}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, gap: 12 }}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{restaurant.cuisine.toUpperCase()}</Text>
+            <Text style={{ color: '#d2a14c', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>{(restaurant.cuisine || 'Restaurant').toUpperCase()}</Text>
             <Text style={styles.title} numberOfLines={3} ellipsizeMode="tail">{restaurant.name}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, flexShrink: 0 }}>
@@ -320,7 +325,7 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
           </View>
         </View>
           <Text style={[styles.restaurantMeta, { fontSize: 13, marginBottom: 12, lineHeight: 20 }]}> 
-          📍 {restaurant.city}, {restaurant.country} · Released: {restaurant.year || restaurant.year_awarded || '—'} · Tier: {'★'.repeat(restaurant.stars)}
+          📍 {restaurant.city || '—'}, {restaurant.country || '—'} · Released: {restaurant.year || restaurant.year_awarded || '—'} · Tier: {'★'.repeat(Number(restaurant.stars) || 0)}
         </Text>
         {restaurant.review_count > 0 ? (
           <Text style={[styles.restaurantMeta, { fontSize: 13, marginBottom: 12, color: '#d2a14c' }]}>
@@ -330,6 +335,12 @@ export default function RestaurantDetailScreen({ restaurant, currentUser, onClos
         <View style={[styles.badge, { backgroundColor: '#1a1e23', marginBottom: 16, alignSelf: 'flex-start' }]}>
           <Text style={{ color: '#f8f0e9', fontSize: 12, fontWeight: '700' }}>{restaurant.price_tier ? '💰'.repeat(restaurant.price_tier) : 'Price unavailable'}</Text>
         </View>
+
+        {onCheckIn && canCheckIn ? (
+          <InteractivePressable onPress={onCheckIn} style={[styles.copyShareButton, { marginTop: 0, marginBottom: 18 }]}>
+            <Text style={styles.copyShareButtonText}>Check in at this restaurant</Text>
+          </InteractivePressable>
+        ) : null}
 
         <View style={[styles.splitterCard, { padding: 0, marginBottom: 16, overflow: 'hidden' }]}>
           <InteractivePressable onPress={toggleHours} style={{ padding: 16 }}>

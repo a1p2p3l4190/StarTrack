@@ -17,8 +17,9 @@ const KIND_META = {
   too_far: { icon: '🔒', color: '#e8b23d', title: 'Check-in Locked' },
 };
 
-export default function CheckinResultModal({ visible, kind = 'error', message, badges, restaurantName, scanning = false, onDismiss, onPrimary }) {
+export default function CheckinResultModal({ visible, kind = 'error', action, message, badges, restaurantName, scanning = false, onDismiss, onPrimary }) {
   const meta = KIND_META[kind] || KIND_META.error;
+  const primaryLabel = kind === 'success' ? 'View My Passport' : action === 'open_settings' ? 'Open Settings' : 'Try Again';
 
   return (
     <Modal visible={visible || scanning} transparent animationType="fade" onRequestClose={scanning ? undefined : onDismiss}>
@@ -52,7 +53,7 @@ export default function CheckinResultModal({ visible, kind = 'error', message, b
             style={[styles.copyShareButton, { width: '100%', marginTop: 20, paddingVertical: 12 }]}
             onPress={onPrimary || onDismiss}
           >
-            <Text style={styles.copyShareButtonText}>{kind === 'success' ? 'View My Passport' : 'Try Again'}</Text>
+            <Text style={styles.copyShareButtonText}>{primaryLabel}</Text>
           </Pressable>
           {kind !== 'success' && (
             <Pressable onPress={onDismiss} style={{ marginTop: 12, padding: 6 }}>
