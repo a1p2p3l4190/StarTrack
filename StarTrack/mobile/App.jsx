@@ -97,6 +97,12 @@ export default function App() {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [pushToken, setPushToken] = useState(null);
   const contentScrollRef = useRef(null);
+  // Guards performCheckIn against firing twice for one tap (e.g. a fast
+  // double-tap on "Begin Scan" before the confirm modal has re-rendered
+  // closed). `scanning` state can't do this job — it's applied async, so
+  // both taps can still read it as false in the same render pass. A ref
+  // mutates synchronously, so the second call sees the guard immediately.
+  const checkinInFlightRef = useRef(false);
 
   const openRestaurantDetail = (restaurant) => {
     const restaurantId = restaurant?.id ?? restaurant?.restaurant_id;
@@ -413,6 +419,12 @@ export default function App() {
       setCheckinResult({ kind: 'offline', message: "You're offline — reconnect to verify your check-in." });
       return;
     }
+    // A duplicate call here would hit the backend's 5-minute checkin
+    // cooldown and come back as a conflict — which, if its response lands
+    // after the first (successful) call's, overwrites a just-shown success
+    // result with a spurious "check-in failed".
+    if (checkinInFlightRef.current) return;
+    checkinInFlightRef.current = true;
 
     setScanning(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -461,6 +473,7 @@ export default function App() {
         setCheckinResult({ kind: 'failure', message: mapCheckinMessage(err.message) });
       }
     } finally {
+      checkinInFlightRef.current = false;
       setScanning(false);
     }
   }
@@ -521,6 +534,15 @@ export default function App() {
     const result = checkinResult;
     setCheckinResult(null);
     if (result?.kind === 'success') {
+      // detailTarget being set forces the top-level render to stay on
+      // RestaurantDetailScreen no matter what currentTab is (see the early
+      // `if (detailTarget) return ...` below) — so a check-in confirmed from
+      // inside a restaurant's detail view has to clear it here, or "View My
+      // Passport" silently does nothing and leaves the (still-enabled)
+      // "Check in at this restaurant" button sitting right where the modal
+      // just was, one stray tap away from re-firing a check-in that's now
+      // within the backend's cooldown window.
+      setDetailTarget(null);
       setCurrentTab('passport');
     } else if (result?.action === 'open_settings') {
       Linking.openSettings().catch(() => {});
